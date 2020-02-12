@@ -20,6 +20,7 @@ pub mod util {
 }
 
 pub mod lexer {
+    use super::util;
     use std::cmp::PartialEq;
     use std::error::Error;
     use std::fmt;
@@ -31,9 +32,9 @@ pub mod lexer {
     #[derive(Debug)]
     pub enum LexerError {
         EOF,
-        NoToken(usize, char),
-        NumberFormat(usize, String),
-        InvalidEscape(usize, String),
+        NoToken(String, char),
+        NumberFormat(String, String),
+        InvalidEscape(String, String),
     }
 
     impl Error for LexerError {}
@@ -152,7 +153,10 @@ pub mod lexer {
         })
     }
 
-    fn get_number_token(iterator: &mut Peekable<Enumerate<Chars>>) -> Result<Token, LexerError> {
+    fn get_number_token(
+        iterator: &mut Peekable<Enumerate<Chars>>,
+        text: &String,
+    ) -> Result<Token, LexerError> {
         let position = get_char(iterator)?.0;
         let mut current_token: String = String::new();
         loop {
@@ -171,21 +175,24 @@ pub mod lexer {
         Ok(if current_token.contains('.') {
             Token::ValFloat(
                 position,
-                current_token
-                    .parse::<f64>()
-                    .map_err(|_| LexerError::NumberFormat(position, current_token))?,
+                current_token.parse::<f64>().map_err(|_| {
+                    LexerError::NumberFormat(util::get_text_pos(position, text), current_token)
+                })?,
             )
         } else {
             Token::ValInt(
                 position,
-                current_token
-                    .parse::<u64>()
-                    .map_err(|_| LexerError::NumberFormat(position, current_token))?,
+                current_token.parse::<u64>().map_err(|_| {
+                    LexerError::NumberFormat(util::get_text_pos(position, text), current_token)
+                })?,
             )
         })
     }
 
-    fn get_string_token(iterator: &mut Peekable<Enumerate<Chars>>) -> Result<Token, LexerError> {
+    fn get_string_token(
+        iterator: &mut Peekable<Enumerate<Chars>>,
+        text: &String,
+    ) -> Result<Token, LexerError> {
         let position = get_char(iterator)?.0;
         iterator.next();
         let mut current_token: String = String::new();
@@ -201,7 +208,7 @@ pub mod lexer {
                     'r' => '\r',
                     _ => {
                         return Err(LexerError::InvalidEscape(
-                            position + current_token.len() + 1,
+                            util::get_text_pos(position + current_token.len() + 1, text),
                             next.to_string() + &escaped.to_string(),
                         ));
                     }
@@ -218,7 +225,10 @@ pub mod lexer {
         Ok(Token::ValString(position, current_token))
     }
 
-    pub fn get_token(iterator: &mut Peekable<Enumerate<Chars>>) -> Result<Token, LexerError> {
+    pub fn get_token(
+        iterator: &mut Peekable<Enumerate<Chars>>,
+        text: &String,
+    ) -> Result<Token, LexerError> {
         let (position, mut next) = get_char(iterator)?;
         if next.is_whitespace() {
             loop {
@@ -228,14 +238,14 @@ pub mod lexer {
                 }
                 iterator.next();
             }
-            get_token(iterator)
+            get_token(iterator, text)
         } else {
             if next.is_alphabetic() {
                 get_keyword_or_ident_token(iterator)
             } else if next.is_digit(10) {
-                get_number_token(iterator)
+                get_number_token(iterator, text)
             } else if next == '"' {
-                get_string_token(iterator)
+                get_string_token(iterator, text)
             } else {
                 iterator.next();
                 match next {
@@ -348,7 +358,10 @@ pub mod lexer {
                             Token::GreaterThan(position)
                         },
                     ),
-                    _ => Err(LexerError::NoToken(position, next)),
+                    _ => Err(LexerError::NoToken(
+                        util::get_text_pos(position, text),
+                        next,
+                    )),
                 }
             }
         }
@@ -366,7 +379,7 @@ mod tests {
     fn run_lexer(contents: &str) -> Token {
         let mut iterator = contents.chars().enumerate().peekable();
 
-        match lexer::get_token(&mut iterator) {
+        match lexer::get_token(&mut iterator, &contents.to_string()) {
             Ok(t) => t,
             Err(err) => panic!("{}", err),
         }
