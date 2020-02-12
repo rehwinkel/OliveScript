@@ -1,0 +1,15 @@
+[package]
+name = "olive"
+version = "0.1.0"
+authors = ["Ian Rehwinkel <ian.rehwinkel@tutanota.com>"]
+edition = "2018"
+
+[[bin]]
+name = "olv"
+path = "src/main_interpreter.rs"
+
+[[bin]]
+name = "olvc"
+path = "src/main_compiler.rs"
+
+[dependencies]
