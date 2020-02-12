@@ -14,7 +14,7 @@ fn main() -> Result<(), String> {
             Err(err) => match err {
                 LexerError::EOF => {
                     break;
-                },
+                }
                 _ => {
                     return Err(format!("{}", err));
                 }
