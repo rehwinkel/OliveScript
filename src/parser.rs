@@ -239,6 +239,26 @@ pub mod lexer {
                 iterator.next();
             }
             get_token(iterator, text)
+        } else if next == '#' {
+            iterator.next();
+            let multiline = get_char(iterator)?.1 == '#';
+            if multiline {
+                iterator.next();
+            }
+            loop {
+                next = get_char(iterator)?.1;
+                if multiline {
+                    if next == '#' {
+                        break;
+                    }
+                } else {
+                    if next == '\n' {
+                        break;
+                    }
+                }
+                iterator.next();
+            }
+            get_token(iterator, text)
         } else {
             if next.is_alphabetic() {
                 get_keyword_or_ident_token(iterator)
@@ -375,6 +395,8 @@ mod tests {
     use super::lexer;
     use super::lexer::Token;
     use super::util;
+    use std::fs;
+    use std::io;
 
     fn run_lexer(contents: &str) -> Token {
         let mut iterator = contents.chars().enumerate().peekable();
@@ -389,6 +411,17 @@ mod tests {
     fn test_util_get_text_pos() {
         let text: String = "fun main(\n) test123".to_string();
         assert_eq!(util::get_text_pos(15, &text), "ln 2 col 6".to_string());
+    }
+
+    #[test]
+    fn test_lexer_examples_no_panic() -> Result<(), io::Error> {
+        for ex in fs::read_dir("examples")? {
+            let path = ex?.path();
+            println!("{:?}", path);
+            let contents = fs::read_to_string(path)?;
+            run_lexer(contents.as_str());
+        }
+        Ok(())
     }
 
     #[test]
