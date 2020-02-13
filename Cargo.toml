@@ -1,5 +1,5 @@
 [package]
-name = "olive"
+name = "olive_script"
 version = "0.1.0"
 authors = ["Ian Rehwinkel <ian.rehwinkel@tutanota.com>"]
 edition = "2018"
