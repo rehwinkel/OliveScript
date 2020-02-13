@@ -1,4 +1,41 @@
 pub mod util {
+    use std::error::Error;
+    use std::fmt;
+    use std::fmt::Formatter;
+    use std::fmt::{Debug, Display};
+    #[derive(Debug)]
+    pub enum ParserError {
+        EOF,
+        NoToken(String, char),
+        NumberFormat(String, String),
+        InvalidEscape(String, String),
+        UnexpectedToken(String, String, String),
+    }
+
+    impl Error for ParserError {}
+
+    impl Display for ParserError {
+        fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+            match self {
+                ParserError::EOF => write!(f, "Reached end of file"),
+                ParserError::NoToken(pos, err) => {
+                    write!(f, "invalid token found at {}: {}", pos, err)
+                }
+                ParserError::NumberFormat(pos, err) => {
+                    write!(f, "number format error at {}: {}", pos, err)
+                }
+                ParserError::InvalidEscape(pos, err) => {
+                    write!(f, "invalid escape character at {}: {}", pos, err)
+                }
+                ParserError::UnexpectedToken(pos, exp, err) => write!(
+                    f,
+                    "unexpected token at {}, expected {} got: {}",
+                    pos, exp, err
+                ),
+            }
+        }
+    }
+
     pub fn get_text_pos(position: usize, text: &String) -> String {
         let mut line = 1;
         let mut col = 1;
@@ -21,40 +58,10 @@ pub mod util {
 
 pub mod lexer {
     use super::util;
+    use super::util::ParserError;
     use std::cmp::PartialEq;
-    use std::error::Error;
-    use std::fmt;
-    use std::fmt::Formatter;
-    use std::fmt::{Debug, Display};
     use std::iter::{Enumerate, Peekable};
     use std::str::Chars;
-
-    #[derive(Debug)]
-    pub enum LexerError {
-        EOF,
-        NoToken(String, char),
-        NumberFormat(String, String),
-        InvalidEscape(String, String),
-    }
-
-    impl Error for LexerError {}
-
-    impl Display for LexerError {
-        fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-            match self {
-                LexerError::EOF => write!(f, "Reached end of file"),
-                LexerError::NoToken(pos, err) => {
-                    write!(f, "invalid token found at {}: {}", pos, err)
-                }
-                LexerError::NumberFormat(pos, err) => {
-                    write!(f, "number format error at {}: {}", pos, err)
-                }
-                LexerError::InvalidEscape(pos, err) => {
-                    write!(f, "invalid escape character at {}: {}", pos, err)
-                }
-            }
-        }
-    }
 
     #[derive(Debug, PartialEq)]
     pub enum Token {
@@ -108,16 +115,71 @@ pub mod lexer {
         GreaterEquals(usize),
     }
 
-    fn get_char(iterator: &mut Peekable<Enumerate<Chars>>) -> Result<(usize, char), LexerError> {
+    impl Token {
+        pub fn get_position(&self) -> usize {
+            match *self {
+                Token::Ident(pos, _) => pos,
+                Token::Fun(pos) => pos,
+                Token::If(pos) => pos,
+                Token::Else(pos) => pos,
+                Token::Elif(pos) => pos,
+                Token::While(pos) => pos,
+                Token::Continue(pos) => pos,
+                Token::Break(pos) => pos,
+                Token::For(pos) => pos,
+                Token::In(pos) => pos,
+                Token::Return(pos) => pos,
+                Token::BoolAnd(pos) => pos,
+                Token::BoolOr(pos) => pos,
+                Token::ValTrue(pos) => pos,
+                Token::ValFalse(pos) => pos,
+                Token::ValNone(pos) => pos,
+                Token::ValFloat(pos, _) => pos,
+                Token::ValInt(pos, _) => pos,
+                Token::ValString(pos, _) => pos,
+                Token::LPar(pos) => pos,
+                Token::RPar(pos) => pos,
+                Token::LBrack(pos) => pos,
+                Token::RBrack(pos) => pos,
+                Token::LBrace(pos) => pos,
+                Token::RBrace(pos) => pos,
+                Token::Semi(pos) => pos,
+                Token::Comma(pos) => pos,
+                Token::Add(pos) => pos,
+                Token::Minus(pos) => pos,
+                Token::Mul(pos) => pos,
+                Token::Mod(pos) => pos,
+                Token::BitOr(pos) => pos,
+                Token::BitXOr(pos) => pos,
+                Token::BitAnd(pos) => pos,
+                Token::BitLsh(pos) => pos,
+                Token::BitRsh(pos) => pos,
+                Token::BitURsh(pos) => pos,
+                Token::Concat(pos) => pos,
+                Token::IntDiv(pos) => pos,
+                Token::FloatDiv(pos) => pos,
+                Token::Assign(pos) => pos,
+                Token::Equals(pos) => pos,
+                Token::NotEquals(pos) => pos,
+                Token::BoolNot(pos) => pos,
+                Token::LessThan(pos) => pos,
+                Token::LessEquals(pos) => pos,
+                Token::GreaterThan(pos) => pos,
+                Token::GreaterEquals(pos) => pos,
+            }
+        }
+    }
+
+    fn get_char(iterator: &mut Peekable<Enumerate<Chars>>) -> Result<(usize, char), ParserError> {
         match iterator.peek() {
             Some(x) => Ok(*x),
-            None => Err(LexerError::EOF),
+            None => Err(ParserError::EOF),
         }
     }
 
     fn get_keyword_or_ident_token(
         iterator: &mut Peekable<Enumerate<Chars>>,
-    ) -> Result<Token, LexerError> {
+    ) -> Result<Token, ParserError> {
         let position = get_char(iterator)?.0;
         let mut current_token: String = String::new();
         loop {
@@ -156,7 +218,7 @@ pub mod lexer {
     fn get_number_token(
         iterator: &mut Peekable<Enumerate<Chars>>,
         text: &String,
-    ) -> Result<Token, LexerError> {
+    ) -> Result<Token, ParserError> {
         let position = get_char(iterator)?.0;
         let mut current_token: String = String::new();
         loop {
@@ -176,14 +238,14 @@ pub mod lexer {
             Token::ValFloat(
                 position,
                 current_token.parse::<f64>().map_err(|_| {
-                    LexerError::NumberFormat(util::get_text_pos(position, text), current_token)
+                    ParserError::NumberFormat(util::get_text_pos(position, text), current_token)
                 })?,
             )
         } else {
             Token::ValInt(
                 position,
                 current_token.parse::<u64>().map_err(|_| {
-                    LexerError::NumberFormat(util::get_text_pos(position, text), current_token)
+                    ParserError::NumberFormat(util::get_text_pos(position, text), current_token)
                 })?,
             )
         })
@@ -192,7 +254,7 @@ pub mod lexer {
     fn get_string_token(
         iterator: &mut Peekable<Enumerate<Chars>>,
         text: &String,
-    ) -> Result<Token, LexerError> {
+    ) -> Result<Token, ParserError> {
         let position = get_char(iterator)?.0;
         iterator.next();
         let mut current_token: String = String::new();
@@ -207,7 +269,7 @@ pub mod lexer {
                     'n' => '\n',
                     'r' => '\r',
                     _ => {
-                        return Err(LexerError::InvalidEscape(
+                        return Err(ParserError::InvalidEscape(
                             util::get_text_pos(position + current_token.len() + 1, text),
                             next.to_string() + &escaped.to_string(),
                         ));
@@ -228,7 +290,7 @@ pub mod lexer {
     pub fn get_token(
         iterator: &mut Peekable<Enumerate<Chars>>,
         text: &String,
-    ) -> Result<Token, LexerError> {
+    ) -> Result<Token, ParserError> {
         let (position, mut next) = get_char(iterator)?;
         if next.is_whitespace() {
             loop {
@@ -378,7 +440,7 @@ pub mod lexer {
                             Token::GreaterThan(position)
                         },
                     ),
-                    _ => Err(LexerError::NoToken(
+                    _ => Err(ParserError::NoToken(
                         util::get_text_pos(position, text),
                         next,
                     )),
@@ -388,7 +450,61 @@ pub mod lexer {
     }
 }
 
-pub mod parser {}
+pub mod parser {
+    use super::util;
+    use super::lexer;
+    use super::lexer::Token;
+    use super::util::ParserError;
+    use std::iter::{Enumerate, Peekable};
+    use std::mem;
+    use std::str::Chars;
+
+    struct Parser<'a> {
+        iterator: &'a mut Peekable<Enumerate<Chars<'a>>>,
+        contents: &'a String,
+        current: &'a mut Token,
+    }
+
+    impl Parser<'_> {
+        fn eat(&mut self) -> Result<(), ParserError> {
+            *self.current = lexer::get_token(self.iterator, self.contents)?;
+            Ok(())
+        }
+
+        /*fn peek(&self) -> &Token {
+            self.current
+        }*/
+
+        fn accept(&self, typetoken: &Token) -> bool {
+            mem::discriminant(self.current) == mem::discriminant(typetoken)
+        }
+
+        fn expect(&self, typetoken: &Token) -> Result<(), ParserError> {
+            if self.accept(typetoken) {
+                Ok(())
+            } else {
+                let pos: String = util::get_text_pos(self.current.get_position(), self.contents);
+                Err(ParserError::UnexpectedToken(pos, format!("{:?}", typetoken), format!("{:?}", self.current)))
+            }
+        }
+    }
+
+    pub fn parse(contents: &String) -> Result<(), ParserError> {
+        let mut iterator = contents.chars().enumerate().peekable();
+        let mut token = lexer::get_token(&mut iterator, contents)?;
+        let mut parser = Parser {
+            iterator: &mut iterator,
+            contents: contents,
+            current: &mut token,
+        };
+        if parser.accept(&Token::Fun(0)) {
+            parser.eat()?;
+            parser.expect(&Token::LPar(0))?;
+        }
+        parser.eat()?;
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {
