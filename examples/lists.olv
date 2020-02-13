@@ -1,0 +1,15 @@
+## the list is a linear collection of elements 
+(based on cpp vector) ##
+
+# new list
+empty = [];
+with_objs = [1, 2, 3];
+
+# get length with inbuilt function
+print(len(empty));
+
+# access
+print(with_objs[0]);
+
+# writing
+with_objs[1] = "ölo";

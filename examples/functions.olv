@@ -1,0 +1,11 @@
+# importing native functions
+native_fun = import("native_module")["test"];
+native_fun = import("native_module").test; # shorthand for ["test"]
+
+# defining a function (with closure)
+my_func = fun(a) {
+    return fun(b) { return a * b; };
+};
+
+# calling funcions (and closures)
+my_func(7)(2);

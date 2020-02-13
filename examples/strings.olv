@@ -1,0 +1,14 @@
+## the following string has escaped characters inside. 
+   these include \n, \r, \" and \\ ##
+escaped_string = "This is a \"Hello World\" string.\nThis is the second line.\r\nAnd This is the third, with an emoji :\\";
+test_str = "test";
+int = 3;
+
+# concatenating strings
+print(test_str $ escaped_string);
+
+# concatenating a number to a string
+print(test_str $ int);
+
+# get len with inbuilt func
+print(len(test_str));

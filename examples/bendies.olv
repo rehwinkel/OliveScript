@@ -1,0 +1,18 @@
+## the bendy datatype (deutsch: flexibel) is a datatype similar to a dictionary/table
+it has the name because of its flexibility ##
+
+# creating a new bendy
+obj = {
+    "test": fun(test) {
+        print(test);
+    }
+}
+empty = {}
+
+# access
+print(obj["test"]);
+print(obj.test);
+
+# writing
+obj["vlöa"] = "ölo";
+olv.gpw = "test2;

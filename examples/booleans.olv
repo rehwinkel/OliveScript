@@ -1,0 +1,6 @@
+yes = true; # true value
+no = false; # false value
+print(yes == !no); # boolean not
+bool_and = yes and true; # boolean and
+bool_or = no or yes; # boolean or 
+print(bool_and);
