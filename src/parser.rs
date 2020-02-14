@@ -10,6 +10,7 @@ pub mod util {
         NumberFormat(String, String),
         InvalidEscape(String, String),
         UnexpectedToken(String, String, String),
+        NotAccepted,
     }
 
     impl Error for ParserError {}
@@ -18,6 +19,7 @@ pub mod util {
         fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
             match self {
                 ParserError::EOF => write!(f, "Reached end of file"),
+                ParserError::NotAccepted => write!(f, "statement or expression not accepted"),
                 ParserError::NoToken(pos, err) => {
                     write!(f, "invalid token found at {}: {}", pos, err)
                 }
@@ -63,7 +65,7 @@ pub mod lexer {
     use std::iter::{Enumerate, Peekable};
     use std::str::Chars;
 
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Clone)]
     pub enum Token {
         Ident(usize, String),
         Fun(usize),
@@ -451,9 +453,9 @@ pub mod lexer {
 }
 
 pub mod parser {
-    use super::util;
     use super::lexer;
     use super::lexer::Token;
+    use super::util;
     use super::util::ParserError;
     use std::iter::{Enumerate, Peekable};
     use std::mem;
@@ -465,15 +467,46 @@ pub mod parser {
         current: &'a mut Token,
     }
 
+    trait AST {
+        fn generate_source(&self) -> &str;
+    }
+
+    enum Expression {
+        FuncDef(Vec<Token>, Statement),
+    }
+
+    enum Statement {
+        Block,
+    }
+
+    impl AST for Token {
+        fn generate_source(&self) -> &str {
+            match self {
+                Token::ValFalse(_) => "false",
+                Token::Ident(_, name) => name.as_str(),
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    impl AST for Expression {
+        fn generate_source(&self) -> &str {
+            match self {
+                Expression::FuncDef(_, _) => "fun(",
+                _ => unimplemented!(),
+            }
+        }
+    }
+
     impl Parser<'_> {
         fn eat(&mut self) -> Result<(), ParserError> {
             *self.current = lexer::get_token(self.iterator, self.contents)?;
             Ok(())
         }
 
-        /*fn peek(&self) -> &Token {
-            self.current
-        }*/
+        fn peek(&self) -> Token {
+            self.current.clone()
+        }
 
         fn accept(&self, typetoken: &Token) -> bool {
             mem::discriminant(self.current) == mem::discriminant(typetoken)
@@ -484,8 +517,41 @@ pub mod parser {
                 Ok(())
             } else {
                 let pos: String = util::get_text_pos(self.current.get_position(), self.contents);
-                Err(ParserError::UnexpectedToken(pos, format!("{:?}", typetoken), format!("{:?}", self.current)))
+                Err(ParserError::UnexpectedToken(
+                    pos,
+                    format!("{:?}", typetoken),
+                    format!("{:?}", self.current),
+                ))
             }
+        }
+    }
+
+    fn parse_st_block(parser: &mut Parser) -> Result<Statement, ParserError> {
+        Ok(Statement::Block)
+    }
+
+    fn parse_ex_func_def(parser: &mut Parser) -> Result<Expression, ParserError> {
+        if parser.accept(&Token::Fun(0)) {
+            parser.eat()?;
+            parser.expect(&Token::LPar(0))?;
+            parser.eat()?;
+            let mut args: Vec<Token> = Vec::new();
+            while parser.accept(&Token::Ident(0, String::new())) {
+                let tok: Token = parser.peek();
+                args.push(tok);
+                parser.eat()?;
+                if parser.accept(&Token::RPar(0)) {
+                    break;
+                }
+                parser.expect(&Token::Comma(0))?;
+                parser.eat()?;
+            }
+            parser.expect(&Token::RPar(0))?;
+            parser.eat()?;
+            let block = parse_st_block(parser)?;
+            Ok(Expression::FuncDef(args, block))
+        } else {
+            Err(ParserError::NotAccepted)
         }
     }
 
@@ -497,11 +563,7 @@ pub mod parser {
             contents: contents,
             current: &mut token,
         };
-        if parser.accept(&Token::Fun(0)) {
-            parser.eat()?;
-            parser.expect(&Token::LPar(0))?;
-        }
-        parser.eat()?;
+        parse_ex_func_def(&mut parser)?;
         Ok(())
     }
 }
