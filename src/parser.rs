@@ -689,6 +689,7 @@ pub mod parser {
     #[cfg(test)]
     mod test {
         use super::parse_ex_func_def;
+        use super::parse_ex_value;
         use super::Expression;
         use super::Parser;
         use crate::parser::lexer;
@@ -710,10 +711,22 @@ pub mod parser {
         }
 
         #[test]
-        fn test_parser_func_def() {
-            run_parser("fun(test, args){}", &parse_ex_func_def);
-            run_parser("fun(test){}", &parse_ex_func_def);
-            run_parser("fun(){}", &parse_ex_func_def);
+        fn test_parse_ex_func_def() {
+            run_parser("fun(test, args) preventeof", &parse_ex_func_def);
+            run_parser("fun(test) preventeof", &parse_ex_func_def);
+            run_parser("fun() preventeof", &parse_ex_func_def);
+        }
+
+        #[test]
+        fn test_parse_ex_value() {
+            run_parser("3.1415926535 preventeof", &parse_ex_value);
+            run_parser("50981237 preventeof", &parse_ex_value);
+            run_parser("\"this is a test string \\n oh yeah\" preventeof", &parse_ex_value);
+            run_parser("true preventeof", &parse_ex_value);
+            run_parser("false preventeof", &parse_ex_value);
+            run_parser("none preventeof", &parse_ex_value);
+            run_parser("test preventeof", &parse_ex_value);
+            run_parser("bla preventeof", &parse_ex_value);
         }
     }
 }
