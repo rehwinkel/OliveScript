@@ -10,7 +10,7 @@ pub mod util {
         NumberFormat(String, String),
         InvalidEscape(String, String),
         UnexpectedToken(String, String, String),
-        NotAccepted,
+        NotAccepted(String, String),
     }
 
     impl Error for ParserError {}
@@ -18,8 +18,8 @@ pub mod util {
     impl Display for ParserError {
         fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
             match self {
-                ParserError::EOF => write!(f, "Reached end of file"),
-                ParserError::NotAccepted => write!(f, "statement or expression not accepted"),
+                ParserError::EOF => write!(f, "reached end of file"),
+                ParserError::NotAccepted(msg, pos) => write!(f, "not accepted at {}: {}", pos, msg),
                 ParserError::NoToken(pos, err) => {
                     write!(f, "invalid token found at {}: {}", pos, err)
                 }
@@ -601,7 +601,7 @@ pub mod parser {
     #[derive(Debug)]
     pub struct BendyPair {
         identifier: Token,
-        value: Box<Expression>,
+        value: Expression,
     }
 
     #[derive(Debug)]
@@ -641,13 +641,27 @@ pub mod parser {
                 Ok(())
             } else {
                 let pos: String = util::get_text_pos(self.current.get_position(), self.contents);
-                Err(ParserError::UnexpectedToken(
+                let err = ParserError::UnexpectedToken(
                     pos,
                     format!("{:?}", typetoken),
                     format!("{:?}", self.current),
-                ))
+                );
+                println!("{}", err);
+                Err(err)
             }
         }
+    }
+
+    macro_rules! is_accepted {
+        ($e: expr) => {
+            match $e {
+                Ok(ex) => Ok(Some(ex)),
+                Err(err) => match err {
+                    ParserError::NotAccepted(_, _) => Ok(None),
+                    _ => Err(err),
+                },
+            }
+        };
     }
 
     fn parse_ex_new_func(parser: &mut Parser) -> Result<Expression, ParserError> {
@@ -671,36 +685,67 @@ pub mod parser {
             let block = parse_st_block(parser, true)?;
             Ok(Expression::NewFunc(args, Box::from(block)))
         } else {
-            Err(ParserError::NotAccepted)
+            Err(ParserError::NotAccepted(
+                String::from("new_func"),
+                util::get_text_pos(parser.current.get_position(), parser.contents),
+            ))
         }
     }
 
     fn parse_ex_new_list_or_bendy(parser: &mut Parser) -> Result<Expression, ParserError> {
         if parser.accept(&Token::New(0)) {
             parser.eat()?;
-            Ok(if parser.accept(&Token::LBrack(0)) {
+            if parser.accept(&Token::LBrack(0)) {
                 parser.eat()?;
-                //
+                let mut exprs = Vec::new();
+                while !parser.accept(&Token::RBrack(0)) {
+                    exprs.push(Box::from(parse_ex(parser)?));
+                    if !parser.accept(&Token::Comma(0)) {
+                        break;
+                    } else {
+                        parser.eat()?;
+                    }
+                }
                 parser.expect(&Token::RBrack(0))?;
                 parser.eat()?;
-                Expression::NewList(Vec::new())
+                Ok(Expression::NewList(exprs))
             } else {
                 parser.expect(&Token::LBrace(0))?;
                 parser.eat()?;
-                //
+                let mut pairs = Vec::new();
+                while !parser.accept(&Token::RBrace(0)) {
+                    parser.expect(&Token::Ident(0, String::new()))?;
+                    let name = parser.peek();
+                    parser.eat()?;
+                    parser.expect(&Token::Colon(0))?;
+                    parser.eat()?;
+                    let expr = parse_ex(parser)?;
+                    pairs.push(Box::from(BendyPair {
+                        identifier: name,
+                        value: expr,
+                    }));
+                    if !parser.accept(&Token::Comma(0)) {
+                        break;
+                    } else {
+                        parser.eat()?;
+                    }
+                }
                 parser.expect(&Token::RBrace(0))?;
                 parser.eat()?;
-                Expression::NewBendy(Vec::new())
-            })
+                Ok(Expression::NewBendy(pairs))
+            }
         } else {
-            Err(ParserError::NotAccepted)
+            Err(ParserError::NotAccepted(
+                String::from("list or bendy"),
+                util::get_text_pos(parser.current.get_position(), parser.contents),
+            ))
         }
     }
 
     fn parse_ex_primary(parser: &mut Parser) -> Result<Expression, ParserError> {
-        if let Ok(ex) = parse_ex_new_list_or_bendy(parser) {
+        if let Some(ex) = is_accepted!(parse_ex_new_list_or_bendy(parser))? {
             Ok(ex)
-        } else if let Ok(ex) = parse_ex_new_func(parser) {
+        } else if let Some(ex) = is_accepted!(parse_ex_new_func(parser))? {
             Ok(ex)
         } else if parser.accept(&Token::ValInt(0, 0))
             || parser.accept(&Token::ValFloat(0, 0.0))
@@ -714,7 +759,10 @@ pub mod parser {
             parser.eat()?;
             Ok(Expression::Value(tok))
         } else {
-            Err(ParserError::NotAccepted)
+            Err(ParserError::NotAccepted(
+                String::from("primary"),
+                util::get_text_pos(parser.current.get_position(), parser.contents),
+            ))
         }
     }
 
@@ -723,7 +771,7 @@ pub mod parser {
     }
 
     fn parse_st(parser: &mut Parser) -> Result<Statement, ParserError> {
-        if let Ok(st) = parse_st_block(parser, true) {
+        if let Some(st) = is_accepted!(parse_st_block(parser, true))? {
             Ok(st)
         } else if parser.accept(&Token::Continue(0)) {
             parser.eat()?;
@@ -782,6 +830,12 @@ pub mod parser {
     }
 
     fn parse_st_block(parser: &mut Parser, braces: bool) -> Result<Statement, ParserError> {
+        if braces && !parser.accept(&Token::LBrace(0)) {
+            return Err(ParserError::NotAccepted(
+                String::from("block"),
+                util::get_text_pos(parser.current.get_position(), parser.contents),
+            ));
+        }
         if braces {
             parser.expect(&Token::LBrace(0))?;
             parser.eat()?;
