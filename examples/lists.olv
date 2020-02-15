@@ -2,8 +2,8 @@
 (based on cpp vector) ##
 
 # new list
-empty = [];
-with_objs = [1, 2, 3];
+empty = new [];
+with_objs = new [1, 2, 3];
 
 # get length with inbuilt function
 print(len(empty));

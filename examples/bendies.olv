@@ -2,12 +2,12 @@
 it has the name because of its flexibility ##
 
 # creating a new bendy
-obj = {
-    "test": fun(test) {
+obj = new {
+    test: fun(test) {
         print(test);
     }
 }
-empty = {}
+empty = new {}
 
 # access
 print(obj["test"]);

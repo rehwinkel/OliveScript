@@ -77,25 +77,28 @@ pub mod lexer {
 
     #[derive(Debug, PartialEq, Clone)]
     pub enum Token {
-        Ident(usize, String),
-        Fun(usize),
+        // statements
+        EOF,
         If(usize),
         Else(usize),
-        Elif(usize),
         While(usize),
         Continue(usize),
         Break(usize),
-        For(usize),
-        In(usize),
         Return(usize),
-        BoolAnd(usize),
-        BoolOr(usize),
+        //Elif(usize),
+        //For(usize),
+        //In(usize),
+        // values
+        New(usize),
+        Fun(usize),
+        Ident(usize, String),
         ValTrue(usize),
         ValFalse(usize),
         ValNone(usize),
         ValFloat(usize, f64),
         ValInt(usize, u64),
         ValString(usize, String),
+        // punctuation
         LPar(usize),
         RPar(usize),
         LBrack(usize),
@@ -104,6 +107,8 @@ pub mod lexer {
         RBrace(usize),
         Semi(usize),
         Comma(usize),
+        Colon(usize),
+        // binary/unary operators
         Add(usize),
         Minus(usize),
         Mul(usize),
@@ -125,21 +130,24 @@ pub mod lexer {
         LessEquals(usize),
         GreaterThan(usize),
         GreaterEquals(usize),
+        BoolAnd(usize),
+        BoolOr(usize),
     }
 
     impl Token {
         pub fn get_position(&self) -> usize {
             match *self {
+                Token::EOF => 0,
                 Token::Ident(pos, _) => pos,
                 Token::Fun(pos) => pos,
                 Token::If(pos) => pos,
                 Token::Else(pos) => pos,
-                Token::Elif(pos) => pos,
                 Token::While(pos) => pos,
                 Token::Continue(pos) => pos,
                 Token::Break(pos) => pos,
-                Token::For(pos) => pos,
-                Token::In(pos) => pos,
+                //Token::Elif(pos) => pos,
+                //Token::For(pos) => pos,
+                //Token::In(pos) => pos,
                 Token::Return(pos) => pos,
                 Token::BoolAnd(pos) => pos,
                 Token::BoolOr(pos) => pos,
@@ -178,6 +186,8 @@ pub mod lexer {
                 Token::LessEquals(pos) => pos,
                 Token::GreaterThan(pos) => pos,
                 Token::GreaterEquals(pos) => pos,
+                Token::Colon(pos) => pos,
+                Token::New(pos) => pos,
             }
         }
     }
@@ -211,18 +221,19 @@ pub mod lexer {
             "fun" => Token::Fun(position),
             "if" => Token::If(position),
             "else" => Token::Else(position),
-            "elif" => Token::Elif(position),
             "while" => Token::While(position),
             "continue" => Token::Continue(position),
             "break" => Token::Break(position),
-            "for" => Token::For(position),
-            "in" => Token::In(position),
+            //"elif" => Token::Elif(position),
+            //"for" => Token::For(position),
+            //"in" => Token::In(position),
             "return" => Token::Return(position),
             "true" => Token::ValTrue(position),
             "false" => Token::ValFalse(position),
             "none" => Token::ValNone(position),
             "and" => Token::BoolAnd(position),
             "or" => Token::BoolOr(position),
+            "new" => Token::New(position),
             _ => Token::Ident(position, current_token),
         })
     }
@@ -299,7 +310,7 @@ pub mod lexer {
         Ok(Token::ValString(position, current_token))
     }
 
-    pub fn get_token(
+    pub fn get_token_eof(
         iterator: &mut Peekable<Enumerate<Chars>>,
         text: &str,
     ) -> Result<Token, ParserError> {
@@ -312,7 +323,7 @@ pub mod lexer {
                 }
                 iterator.next();
             }
-            get_token(iterator, text)
+            get_token_eof(iterator, text)
         } else if next == '#' {
             iterator.next();
             let multiline = get_char(iterator)?.1 == '#';
@@ -332,7 +343,7 @@ pub mod lexer {
                 }
                 iterator.next();
             }
-            get_token(iterator, text)
+            get_token_eof(iterator, text)
         } else {
             if next.is_alphabetic() {
                 get_keyword_or_ident_token(iterator)
@@ -359,6 +370,7 @@ pub mod lexer {
                     '^' => Ok(Token::BitXOr(position)),
                     '&' => Ok(Token::BitAnd(position)),
                     '$' => Ok(Token::Concat(position)),
+                    ':' => Ok(Token::Colon(position)),
                     '/' => Ok(
                         if match get_char(iterator) {
                             Ok((_, ch)) => ch,
@@ -461,6 +473,22 @@ pub mod lexer {
         }
     }
 
+    pub fn get_token(
+        iterator: &mut Peekable<Enumerate<Chars>>,
+        text: &str,
+    ) -> Result<Token, ParserError> {
+        match get_token_eof(iterator, text) {
+            Ok(tk) => Ok(tk),
+            Err(err) => {
+                if let ParserError::EOF = err {
+                    Ok(Token::EOF)
+                } else {
+                    Err(err)
+                }
+            }
+        }
+    }
+
     #[cfg(test)]
     mod test {
         use super::get_token;
@@ -508,18 +536,19 @@ pub mod lexer {
             assert_eq!(run_lexer("fun"), Token::Fun(0), "Fun");
             assert_eq!(run_lexer("if"), Token::If(0), "If");
             assert_eq!(run_lexer("else"), Token::Else(0), "Else");
-            assert_eq!(run_lexer("elif"), Token::Elif(0), "Elif");
             assert_eq!(run_lexer("while"), Token::While(0), "While");
             assert_eq!(run_lexer("continue"), Token::Continue(0), "Continue");
             assert_eq!(run_lexer("break"), Token::Break(0), "Break");
-            assert_eq!(run_lexer("for"), Token::For(0), "For");
-            assert_eq!(run_lexer("in"), Token::In(0), "In");
+            //assert_eq!(run_lexer("elif"), Token::Elif(0), "Elif");
+            //assert_eq!(run_lexer("for"), Token::For(0), "For");
+            //assert_eq!(run_lexer("in"), Token::In(0), "In");
             assert_eq!(run_lexer("return"), Token::Return(0), "Return");
             assert_eq!(run_lexer("and"), Token::BoolAnd(0), "BoolAnd");
             assert_eq!(run_lexer("or"), Token::BoolOr(0), "BoolOr");
             assert_eq!(run_lexer("true"), Token::ValTrue(0), "ValTrue");
             assert_eq!(run_lexer("false"), Token::ValFalse(0), "ValFalse");
             assert_eq!(run_lexer("none"), Token::ValNone(0), "None");
+            assert_eq!(run_lexer("new"), Token::New(0), "New");
             assert_eq!(run_lexer("("), Token::LPar(0), "LPar");
             assert_eq!(run_lexer(")"), Token::RPar(0), "RPar");
             assert_eq!(run_lexer("["), Token::LBrack(0), "LBrack");
@@ -549,6 +578,7 @@ pub mod lexer {
             assert_eq!(run_lexer("<="), Token::LessEquals(0), "LessEquals");
             assert_eq!(run_lexer(">"), Token::GreaterThan(0), "GreaterThan");
             assert_eq!(run_lexer(">="), Token::GreaterEquals(0), "GreaterEquals");
+            assert_eq!(run_lexer(":"), Token::Colon(0), "Colon");
         }
     }
 }
@@ -568,36 +598,28 @@ pub mod parser {
         current: &'a mut Token,
     }
 
-    trait AST {
-        fn generate_source(&self) -> &str;
+    #[derive(Debug)]
+    pub struct BendyPair {
+        identifier: Token,
+        value: Box<Expression>,
     }
 
-    enum Expression {
-        FuncDef(Vec<Token>, Statement),
+    #[derive(Debug)]
+    pub enum Expression {
+        NewFunc(Vec<Token>, Box<Statement>),
+        NewList(Vec<Box<Expression>>),
+        NewBendy(Vec<Box<BendyPair>>),
         Value(Token),
     }
 
-    enum Statement {
-        Block,
-    }
-
-    impl AST for Token {
-        fn generate_source(&self) -> &str {
-            match self {
-                Token::ValFalse(_) => "false",
-                Token::Ident(_, name) => name.as_str(),
-                _ => unimplemented!(),
-            }
-        }
-    }
-
-    impl AST for Expression {
-        fn generate_source(&self) -> &str {
-            match self {
-                Expression::FuncDef(_, _) => "fun(",
-                _ => unimplemented!(),
-            }
-        }
+    #[derive(Debug)]
+    pub enum Statement {
+        Block(Vec<Statement>),
+        Continue,
+        Return(Box<Expression>),
+        If(Box<Expression>, Box<Statement>, Option<Box<Statement>>),
+        While(Box<Expression>, Box<Statement>),
+        Expression(Box<Expression>),
     }
 
     impl Parser<'_> {
@@ -628,11 +650,7 @@ pub mod parser {
         }
     }
 
-    fn parse_st_block(parser: &mut Parser) -> Result<Statement, ParserError> {
-        Ok(Statement::Block)
-    }
-
-    fn parse_ex_func_def(parser: &mut Parser) -> Result<Expression, ParserError> {
+    fn parse_ex_new_func(parser: &mut Parser) -> Result<Expression, ParserError> {
         if parser.accept(&Token::Fun(0)) {
             parser.eat()?;
             parser.expect(&Token::LPar(0))?;
@@ -650,15 +668,41 @@ pub mod parser {
             }
             parser.expect(&Token::RPar(0))?;
             parser.eat()?;
-            let block = parse_st_block(parser)?;
-            Ok(Expression::FuncDef(args, block))
+            let block = parse_st_block(parser, true)?;
+            Ok(Expression::NewFunc(args, Box::from(block)))
         } else {
             Err(ParserError::NotAccepted)
         }
     }
 
-    fn parse_ex_value(parser: &mut Parser) -> Result<Expression, ParserError> {
-        if parser.accept(&Token::ValInt(0, 0))
+    fn parse_ex_new_list_or_bendy(parser: &mut Parser) -> Result<Expression, ParserError> {
+        if parser.accept(&Token::New(0)) {
+            parser.eat()?;
+            Ok(if parser.accept(&Token::LBrack(0)) {
+                parser.eat()?;
+                //
+                parser.expect(&Token::RBrack(0))?;
+                parser.eat()?;
+                Expression::NewList(Vec::new())
+            } else {
+                parser.expect(&Token::LBrace(0))?;
+                parser.eat()?;
+                //
+                parser.expect(&Token::RBrace(0))?;
+                parser.eat()?;
+                Expression::NewBendy(Vec::new())
+            })
+        } else {
+            Err(ParserError::NotAccepted)
+        }
+    }
+
+    fn parse_ex_primary(parser: &mut Parser) -> Result<Expression, ParserError> {
+        if let Ok(ex) = parse_ex_new_list_or_bendy(parser) {
+            Ok(ex)
+        } else if let Ok(ex) = parse_ex_new_func(parser) {
+            Ok(ex)
+        } else if parser.accept(&Token::ValInt(0, 0))
             || parser.accept(&Token::ValFloat(0, 0.0))
             || parser.accept(&Token::ValNone(0))
             || parser.accept(&Token::ValFalse(0))
@@ -674,7 +718,90 @@ pub mod parser {
         }
     }
 
-    pub fn parse(contents: &str) -> Result<(), ParserError> {
+    fn parse_ex(parser: &mut Parser) -> Result<Expression, ParserError> {
+        parse_ex_primary(parser)
+    }
+
+    fn parse_st(parser: &mut Parser) -> Result<Statement, ParserError> {
+        if let Ok(st) = parse_st_block(parser, true) {
+            Ok(st)
+        } else if parser.accept(&Token::Continue(0)) {
+            parser.eat()?;
+            parser.expect(&Token::Semi(0))?;
+            parser.eat()?;
+            Ok(Statement::Continue)
+        } else if parser.accept(&Token::Break(0)) {
+            parser.eat()?;
+            parser.expect(&Token::Semi(0))?;
+            parser.eat()?;
+            Ok(Statement::Continue)
+        } else if parser.accept(&Token::Return(0)) {
+            parser.eat()?;
+            let value = parse_ex(parser)?;
+            parser.expect(&Token::Semi(0))?;
+            parser.eat()?;
+            Ok(Statement::Return(Box::from(value)))
+        } else if parser.accept(&Token::While(0)) {
+            parser.eat()?;
+            parser.expect(&Token::LPar(0))?;
+            parser.eat()?;
+            let condition = parse_ex(parser)?;
+            parser.expect(&Token::RPar(0))?;
+            parser.eat()?;
+            let block = parse_st_block(parser, true)?;
+            Ok(Statement::While(Box::from(condition), Box::from(block)))
+        } else if parser.accept(&Token::If(0)) {
+            parser.eat()?;
+            parser.expect(&Token::LPar(0))?;
+            parser.eat()?;
+            let condition = parse_ex(parser)?;
+            parser.expect(&Token::RPar(0))?;
+            parser.eat()?;
+            let block = parse_st_block(parser, true)?;
+            Ok(if parser.accept(&Token::Else(0)) {
+                parser.eat()?;
+                let else_st = if parser.accept(&Token::If(0)) {
+                    parse_st(parser)
+                } else {
+                    parse_st_block(parser, true)
+                }?;
+                Statement::If(
+                    Box::from(condition),
+                    Box::from(block),
+                    Some(Box::from(else_st)),
+                )
+            } else {
+                Statement::If(Box::from(condition), Box::from(block), None)
+            })
+        } else {
+            let expr = parse_ex(parser)?;
+            parser.expect(&Token::Semi(0))?;
+            parser.eat()?;
+            Ok(Statement::Expression(Box::from(expr)))
+        }
+    }
+
+    fn parse_st_block(parser: &mut Parser, braces: bool) -> Result<Statement, ParserError> {
+        if braces {
+            parser.expect(&Token::LBrace(0))?;
+            parser.eat()?;
+        }
+        let mut statements = Vec::new();
+        loop {
+            if parser.accept(&Token::EOF) || parser.accept(&Token::RBrace(0)) {
+                break;
+            } else {
+                statements.push(parse_st(parser)?);
+            }
+        }
+        if braces {
+            parser.expect(&Token::RBrace(0))?;
+            parser.eat()?;
+        }
+        Ok(Statement::Block(statements))
+    }
+
+    pub fn parse(contents: &str) -> Result<Statement, ParserError> {
         let mut iterator = contents.chars().enumerate().peekable();
         let mut token = lexer::get_token(&mut iterator, contents)?;
         let mut parser = Parser {
@@ -682,14 +809,13 @@ pub mod parser {
             contents: contents,
             current: &mut token,
         };
-        parse_ex_func_def(&mut parser)?;
-        Ok(())
+        Ok(parse_st_block(&mut parser, false)?)
     }
 
     #[cfg(test)]
     mod test {
-        use super::parse_ex_func_def;
-        use super::parse_ex_value;
+        use super::parse_ex_new_func;
+        use super::parse_ex_primary;
         use super::Expression;
         use super::Parser;
         use crate::parser::lexer;
@@ -712,21 +838,21 @@ pub mod parser {
 
         #[test]
         fn test_parse_ex_func_def() {
-            run_parser("fun(test, args) preventeof", &parse_ex_func_def);
-            run_parser("fun(test) preventeof", &parse_ex_func_def);
-            run_parser("fun() preventeof", &parse_ex_func_def);
+            run_parser("fun(test, args) {}", &parse_ex_new_func);
+            run_parser("fun(test) {} ", &parse_ex_new_func);
+            run_parser("fun() {} ", &parse_ex_new_func);
         }
 
         #[test]
         fn test_parse_ex_value() {
-            run_parser("3.1415926535 preventeof", &parse_ex_value);
-            run_parser("50981237 preventeof", &parse_ex_value);
-            run_parser("\"this is a test string \\n oh yeah\" preventeof", &parse_ex_value);
-            run_parser("true preventeof", &parse_ex_value);
-            run_parser("false preventeof", &parse_ex_value);
-            run_parser("none preventeof", &parse_ex_value);
-            run_parser("test preventeof", &parse_ex_value);
-            run_parser("bla preventeof", &parse_ex_value);
+            run_parser("3.1415926535", &parse_ex_primary);
+            run_parser("50981237", &parse_ex_primary);
+            run_parser("\"this is a test string \\n oh yeah\"", &parse_ex_primary);
+            run_parser("true", &parse_ex_primary);
+            run_parser("false", &parse_ex_primary);
+            run_parser("none", &parse_ex_primary);
+            run_parser("test", &parse_ex_primary);
+            run_parser("bla", &parse_ex_primary);
         }
     }
 }
