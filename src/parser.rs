@@ -598,21 +598,22 @@ pub mod parser {
         current: &'a mut Token,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct BendyPair {
         identifier: Token,
         value: Expression,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub enum Expression {
         NewFunc(Vec<Token>, Box<Statement>),
         NewList(Vec<Box<Expression>>),
         NewBendy(Vec<Box<BendyPair>>),
         Value(Token),
+        Operator(Token),
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub enum Statement {
         Block(Vec<Statement>),
         Continue,
@@ -766,8 +767,65 @@ pub mod parser {
         }
     }
 
+    fn parse_operator(parser: &mut Parser) -> Result<Token, ParserError> {
+        if parser.accept(&Token::Minus(0)) {
+            let tk = parser.peek();
+            parser.eat()?;
+            Ok(tk)
+        } else {
+            Err(ParserError::NotAccepted(
+                String::from("operator"),
+                util::get_text_pos(parser.current.get_position(), parser.contents),
+            ))
+        }
+    }
+
+    fn parse_element(parser: &mut Parser) -> Result<Expression, ParserError> {
+        if let Ok(op) = parse_operator(parser) {
+            Ok(Expression::Operator(op))
+        } else {
+            Ok(parse_ex_primary(parser)?)
+        }
+    }
+
     fn parse_ex(parser: &mut Parser) -> Result<Expression, ParserError> {
-        parse_ex_primary(parser)
+        let mut output = Vec::new();
+        output.push(parse_element(parser)?);
+        while !(parser.accept(&Token::Semi(0))
+            || parser.accept(&Token::Comma(0))
+            || parser.accept(&Token::RBrace(0))
+            || parser.accept(&Token::RBrack(0))
+            || parser.accept(&Token::RPar(0)))
+        {
+            output.push(parse_element(parser)?);
+        }
+        Ok(output[0].clone())
+    }
+
+    fn parse_st_block(parser: &mut Parser, braces: bool) -> Result<Statement, ParserError> {
+        if braces && !parser.accept(&Token::LBrace(0)) {
+            return Err(ParserError::NotAccepted(
+                String::from("block"),
+                util::get_text_pos(parser.current.get_position(), parser.contents),
+            ));
+        }
+        if braces {
+            parser.expect(&Token::LBrace(0))?;
+            parser.eat()?;
+        }
+        let mut statements = Vec::new();
+        loop {
+            if parser.accept(&Token::EOF) || parser.accept(&Token::RBrace(0)) {
+                break;
+            } else {
+                statements.push(parse_st(parser)?);
+            }
+        }
+        if braces {
+            parser.expect(&Token::RBrace(0))?;
+            parser.eat()?;
+        }
+        Ok(Statement::Block(statements))
     }
 
     fn parse_st(parser: &mut Parser) -> Result<Statement, ParserError> {
@@ -829,32 +887,6 @@ pub mod parser {
         }
     }
 
-    fn parse_st_block(parser: &mut Parser, braces: bool) -> Result<Statement, ParserError> {
-        if braces && !parser.accept(&Token::LBrace(0)) {
-            return Err(ParserError::NotAccepted(
-                String::from("block"),
-                util::get_text_pos(parser.current.get_position(), parser.contents),
-            ));
-        }
-        if braces {
-            parser.expect(&Token::LBrace(0))?;
-            parser.eat()?;
-        }
-        let mut statements = Vec::new();
-        loop {
-            if parser.accept(&Token::EOF) || parser.accept(&Token::RBrace(0)) {
-                break;
-            } else {
-                statements.push(parse_st(parser)?);
-            }
-        }
-        if braces {
-            parser.expect(&Token::RBrace(0))?;
-            parser.eat()?;
-        }
-        Ok(Statement::Block(statements))
-    }
-
     pub fn parse(contents: &str) -> Result<Statement, ParserError> {
         let mut iterator = contents.chars().enumerate().peekable();
         let mut token = lexer::get_token(&mut iterator, contents)?;
@@ -868,7 +900,6 @@ pub mod parser {
 
     #[cfg(test)]
     mod test {
-        use super::parse_ex_new_func;
         use super::parse_ex_primary;
         use super::Expression;
         use super::Parser;
@@ -891,13 +922,6 @@ pub mod parser {
         }
 
         #[test]
-        fn test_parse_ex_func_def() {
-            run_parser("fun(test, args) {}", &parse_ex_new_func);
-            run_parser("fun(test) {} ", &parse_ex_new_func);
-            run_parser("fun() {} ", &parse_ex_new_func);
-        }
-
-        #[test]
         fn test_parse_ex_value() {
             run_parser("3.1415926535", &parse_ex_primary);
             run_parser("50981237", &parse_ex_primary);
@@ -907,6 +931,16 @@ pub mod parser {
             run_parser("none", &parse_ex_primary);
             run_parser("test", &parse_ex_primary);
             run_parser("bla", &parse_ex_primary);
+            run_parser("öpöelßöüĸĸĸ", &parse_ex_primary);
+            run_parser("fun(a){}", &parse_ex_primary);
+            run_parser("fun(a432){}", &parse_ex_primary);
+            run_parser("fun(a,e,r,e,re,e,){}", &parse_ex_primary);
+            run_parser("new []", &parse_ex_primary);
+            run_parser("new [a]", &parse_ex_primary);
+            run_parser("new [a, \"te\", 342.537]", &parse_ex_primary);
+            run_parser("new {}", &parse_ex_primary);
+            run_parser("new {a:3}", &parse_ex_primary);
+            run_parser("new {a:3,öäü:3453}", &parse_ex_primary);
         }
     }
 }
