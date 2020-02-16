@@ -1,8 +1,8 @@
 pub mod util {
     use std::error::Error;
-    use std::fmt;
+    use std::fmt::Display;
+    use std::fmt::Error as FmtError;
     use std::fmt::Formatter;
-    use std::fmt::{Debug, Display};
     #[derive(Debug)]
     pub enum ParserError {
         EOF,
@@ -18,7 +18,7 @@ pub mod util {
     impl Error for ParserError {}
 
     impl Display for ParserError {
-        fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
             match self {
                 ParserError::EOF => write!(f, "reached end of file"),
                 ParserError::NotAccepted(msg, pos) => write!(f, "not accepted at {}: {}", pos, msg),
@@ -75,7 +75,6 @@ pub mod util {
 pub mod lexer {
     use super::util;
     use super::util::ParserError;
-    use std::cmp::PartialEq;
     use std::iter::{Enumerate, Peekable};
     use std::str::Chars;
 

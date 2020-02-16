@@ -1,4 +1,5 @@
 mod parser;
+mod codegen;
 
 use std::env;
 use std::fs;
@@ -10,6 +11,8 @@ fn main() -> Result<(), String> {
             fs::read_to_string(args[1].as_str()).map_err(|err| format!("{}", err))?;
         let block = parser::parser::parse(&contents).map_err(|err| format!("{}", err))?;
         println!("{:?}", block);
+        let codes = codegen::generate(block);
+        println!("{:?}", codes);
         Ok(())
     } else {
         Err(String::from("argument required"))
