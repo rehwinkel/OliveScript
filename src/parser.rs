@@ -13,6 +13,7 @@ pub mod util {
         NotAccepted(String, String),
         UnmatchedPar,
         TooMuchOutput,
+        InvalidValue,
     }
 
     impl Error for ParserError {}
@@ -38,6 +39,7 @@ pub mod util {
                 ),
                 ParserError::UnmatchedPar => write!(f, "unmatched parenthesis"),
                 ParserError::TooMuchOutput => write!(f, "too many expressions on output stack"),
+                ParserError::InvalidValue => write!(f, "invalid value"),
             }
         }
     }
@@ -610,23 +612,24 @@ pub mod parser {
     #[derive(Debug, Clone)]
     pub enum Expression {
         NewFunc(Vec<Token>, Box<Statement>),
-        NewList(Vec<Box<Expression>>),
-        NewBendy(Vec<Box<BendyPair>>),
+        NewList(Vec<Expression>),
+        NewBendy(Vec<BendyPair>),
         Value(Token),
         Operator(Operator),
         Binary(Box<Expression>, Box<Expression>, Operator),
-        Call(Box<Expression>, Vec<Box<Expression>>),
+        Call(Box<Expression>, Vec<Expression>),
         Unary(Box<Expression>, Operator),
     }
 
     #[derive(Debug, Clone)]
     pub enum Statement {
-        Block(Vec<Statement>),
-        Continue,
-        Return(Box<Expression>),
         If(Box<Expression>, Box<Statement>, Option<Box<Statement>>),
         While(Box<Expression>, Box<Statement>),
+        Block(Vec<Statement>),
         Expression(Box<Expression>),
+        Return(Box<Expression>),
+        Continue,
+        Break,
     }
 
     #[derive(Debug, Clone)]
@@ -804,7 +807,7 @@ pub mod parser {
                 parser.eat()?;
                 let mut exprs = Vec::new();
                 while !parser.accept(&Token::RBrack(0)) {
-                    exprs.push(Box::from(parse_ex(parser)?));
+                    exprs.push(parse_ex(parser)?);
                     if !parser.accept(&Token::Comma(0)) {
                         break;
                     } else {
@@ -825,10 +828,10 @@ pub mod parser {
                     parser.expect(&Token::Colon(0))?;
                     parser.eat()?;
                     let expr = parse_ex(parser)?;
-                    pairs.push(Box::from(BendyPair {
+                    pairs.push(BendyPair {
                         identifier: name,
                         value: expr,
-                    }));
+                    });
                     if !parser.accept(&Token::Comma(0)) {
                         break;
                     } else {
@@ -882,7 +885,10 @@ pub mod parser {
                     Operator::Neg
                 } else {
                     match previous.unwrap() {
-                        Expression::Operator(_) => Operator::Neg,
+                        Expression::Operator(op) => match op {
+                            Operator::RPar => Operator::Sub,
+                            _ => Operator::Neg,
+                        },
                         _ => Operator::Sub,
                     }
                 }
@@ -1021,10 +1027,10 @@ pub mod parser {
 
                         let mut args = Vec::new();
                         if !parser.accept(&Token::RPar(0)) {
-                            args.push(Box::from(parse_ex(parser)?));
+                            args.push(parse_ex(parser)?);
                             while parser.accept(&Token::Comma(0)) {
                                 parser.eat()?;
-                                args.push(Box::from(parse_ex(parser)?));
+                                args.push(parse_ex(parser)?);
                             }
                         }
 
@@ -1121,7 +1127,7 @@ pub mod parser {
             parser.eat()?;
             parser.expect(&Token::Semi(0))?;
             parser.eat()?;
-            Ok(Statement::Continue)
+            Ok(Statement::Break)
         } else if parser.accept(&Token::Return(0)) {
             parser.eat()?;
             let value = parse_ex(parser)?;
