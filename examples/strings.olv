@@ -1,5 +1,5 @@
 ## the following string has escaped characters inside. 
-   these include \n, \r, \" and \\ ##
+   these include \n, \r, \" and \\ #
 escaped_string = "This is a \"Hello World\" string.\nThis is the second line.\r\nAnd This is the third, with an emoji :\\";
 test_str = "test";
 int = 3;

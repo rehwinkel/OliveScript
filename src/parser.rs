@@ -613,7 +613,7 @@ pub mod parser {
 
     #[derive(Debug, Clone)]
     pub enum Expression {
-        NewFunc(Vec<Token>, Box<Statement>),
+        NewFunc(Vec<String>, Box<Statement>),
         NewList(Vec<Expression>),
         NewBendy(Vec<BendyPair>),
         Value(Token),
@@ -779,10 +779,13 @@ pub mod parser {
             parser.eat()?;
             parser.expect(&Token::LPar(0))?;
             parser.eat()?;
-            let mut args: Vec<Token> = Vec::new();
+            let mut args: Vec<String> = Vec::new();
             while parser.accept(&Token::Ident(0, String::new())) {
                 let tok: Token = parser.peek();
-                args.push(tok);
+                args.push(match tok {
+                    Token::Ident(_, s) => s,
+                    _ => panic!(),
+                });
                 parser.eat()?;
                 if parser.accept(&Token::RPar(0)) {
                     break;

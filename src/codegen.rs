@@ -9,9 +9,10 @@ pub enum Code {
     PushBoolean(bool),
     PushFloat(f64),
     PushInt(u64),
+    PushNone,
+    NewFun(Vec<String>, Vec<Code>),
     NewBendy,
     NewList,
-    PushNone,
     Return,
     Neg,
     Add,
@@ -146,31 +147,35 @@ impl Generate for Expression {
             Expression::NewList(args) => {
                 let cnt = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
                 codes.push(Code::NewList);
-                codes.push(Code::TStore(cnt));
-                for (i, arg) in args.iter().rev().enumerate() {
-                    arg.generate(codes, false, false)?;
-                    codes.push(Code::PushInt(i as u64));
+                if !args.is_empty() {
+                    codes.push(Code::TStore(cnt));
+                    for (i, arg) in args.iter().enumerate() {
+                        arg.generate(codes, false, false)?;
+                        codes.push(Code::PushInt(i as u64));
+                        codes.push(Code::TLoad(cnt));
+                        codes.push(Code::Put);
+                    }
                     codes.push(Code::TLoad(cnt));
-                    codes.push(Code::Put);
                 }
-                codes.push(Code::TLoad(cnt));
             }
             Expression::NewBendy(args) => {
                 let cnt = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
                 codes.push(Code::NewBendy);
-                codes.push(Code::TStore(cnt));
-                for pair in args.iter().rev() {
-                    pair.value.generate(codes, false, false)?;
-                    codes.push(Code::PushString(pair.identifier.clone()));
+                if !args.is_empty() {
+                    codes.push(Code::TStore(cnt));
+                    for pair in args {
+                        pair.value.generate(codes, false, false)?;
+                        codes.push(Code::PushString(pair.identifier.clone()));
+                        codes.push(Code::TLoad(cnt));
+                        codes.push(Code::Put);
+                    }
                     codes.push(Code::TLoad(cnt));
-                    codes.push(Code::Put);
                 }
-                codes.push(Code::TLoad(cnt));
-            }
-            _ => unimplemented!(),
-            /*
-            Expression::NewFunc(Vec<Token>, Box<Statement>),
-            */
+            },
+            Expression::NewFunc(args, block) => {
+                codes.push(Code::NewFun(args.clone(), generate(*block.clone())?));
+            },
+            _ => panic!(),
         }
         Ok(())
     }
