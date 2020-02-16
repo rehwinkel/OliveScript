@@ -6,8 +6,8 @@ obj = new {
     test: fun(test) {
         print(test);
     }
-}
-empty = new {}
+};
+empty = new {};
 
 # access
 print(obj["test"]);
@@ -15,4 +15,4 @@ print(obj.test);
 
 # writing
 obj["vlöa"] = "ölo";
-olv.gpw = "test2;
+olv.gpw = "test2";

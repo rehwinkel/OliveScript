@@ -6,7 +6,7 @@ basic_arithmetic = fun(a, b) {
     print(a % b); # modulo
     print(a / b); # regular (float) division
     print(a // b); # flooring division
-}
+};
 
 bit_arithmetic = fun(a, b) {
     print(a ^ b); # xor
@@ -15,7 +15,7 @@ bit_arithmetic = fun(a, b) {
     print(a << b); # left shift
     print(a >> b); # right shift
     print(a >>> b); # unsigned right shift
-}
+};
 
 # integers
 int = 2462;

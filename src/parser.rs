@@ -11,6 +11,8 @@ pub mod util {
         InvalidEscape(String, String),
         UnexpectedToken(String, String, String),
         NotAccepted(String, String),
+        UnmatchedPar,
+        TooMuchOutput,
     }
 
     impl Error for ParserError {}
@@ -34,6 +36,8 @@ pub mod util {
                     "unexpected token at {}, expected {} got: {}",
                     pos, exp, err
                 ),
+                ParserError::UnmatchedPar => write!(f, "unmatched parenthesis"),
+                ParserError::TooMuchOutput => write!(f, "too many expressions on output stack"),
             }
         }
     }
@@ -85,7 +89,6 @@ pub mod lexer {
         Continue(usize),
         Break(usize),
         Return(usize),
-        //Elif(usize),
         //For(usize),
         //In(usize),
         // values
@@ -119,9 +122,9 @@ pub mod lexer {
         BitLsh(usize),
         BitRsh(usize),
         BitURsh(usize),
-        Concat(usize),
         IntDiv(usize),
         FloatDiv(usize),
+        Concat(usize),
         Assign(usize),
         Equals(usize),
         NotEquals(usize),
@@ -132,6 +135,7 @@ pub mod lexer {
         GreaterEquals(usize),
         BoolAnd(usize),
         BoolOr(usize),
+        Get(usize),
     }
 
     impl Token {
@@ -145,7 +149,6 @@ pub mod lexer {
                 Token::While(pos) => pos,
                 Token::Continue(pos) => pos,
                 Token::Break(pos) => pos,
-                //Token::Elif(pos) => pos,
                 //Token::For(pos) => pos,
                 //Token::In(pos) => pos,
                 Token::Return(pos) => pos,
@@ -188,6 +191,7 @@ pub mod lexer {
                 Token::GreaterEquals(pos) => pos,
                 Token::Colon(pos) => pos,
                 Token::New(pos) => pos,
+                Token::Get(pos) => pos,
             }
         }
     }
@@ -224,7 +228,6 @@ pub mod lexer {
             "while" => Token::While(position),
             "continue" => Token::Continue(position),
             "break" => Token::Break(position),
-            //"elif" => Token::Elif(position),
             //"for" => Token::For(position),
             //"in" => Token::In(position),
             "return" => Token::Return(position),
@@ -371,6 +374,7 @@ pub mod lexer {
                     '&' => Ok(Token::BitAnd(position)),
                     '$' => Ok(Token::Concat(position)),
                     ':' => Ok(Token::Colon(position)),
+                    '.' => Ok(Token::Get(position)),
                     '/' => Ok(
                         if match get_char(iterator) {
                             Ok((_, ch)) => ch,
@@ -610,7 +614,10 @@ pub mod parser {
         NewList(Vec<Box<Expression>>),
         NewBendy(Vec<Box<BendyPair>>),
         Value(Token),
-        Operator(Token),
+        Operator(Operator),
+        Binary(Box<Expression>, Box<Expression>, Operator),
+        Call(Box<Expression>, Vec<Box<Expression>>),
+        Unary(Box<Expression>, Operator),
     }
 
     #[derive(Debug, Clone)]
@@ -621,6 +628,104 @@ pub mod parser {
         If(Box<Expression>, Box<Statement>, Option<Box<Statement>>),
         While(Box<Expression>, Box<Statement>),
         Expression(Box<Expression>),
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum Operator {
+        Neg,
+        Add,
+        Sub,
+        Mul,
+        IntDiv,
+        FloatDiv,
+        Mod,
+        BitLsh,
+        BitRsh,
+        BitURsh,
+        BitAnd,
+        BitOr,
+        BitXOr,
+        Equals,
+        NotEquals,
+        LessThan,
+        LessEquals,
+        GreaterThan,
+        GreaterEquals,
+        BoolNot,
+        BoolAnd,
+        BoolOr,
+        Concat,
+        Assign,
+        Get,
+        LPar,
+        RPar,
+        ParGet,
+        Call,
+    }
+
+    impl Operator {
+        fn is_binary(&self) -> bool {
+            match self {
+                Operator::Add
+                | Operator::Sub
+                | Operator::IntDiv
+                | Operator::FloatDiv
+                | Operator::Mul
+                | Operator::Mod
+                | Operator::BitOr
+                | Operator::BitXOr
+                | Operator::BitAnd
+                | Operator::BitLsh
+                | Operator::BitRsh
+                | Operator::BitURsh
+                | Operator::Concat
+                | Operator::BoolAnd
+                | Operator::BoolOr
+                | Operator::Assign
+                | Operator::Equals
+                | Operator::NotEquals
+                | Operator::LessEquals
+                | Operator::GreaterEquals
+                | Operator::LessThan
+                | Operator::GreaterThan
+                | Operator::Get
+                | Operator::LPar
+                | Operator::ParGet
+                | Operator::RPar
+                | Operator::Call => true,
+                Operator::Neg | Operator::BoolNot => false,
+            }
+        }
+
+        fn precedence(&self) -> usize {
+            match self {
+                Operator::LPar | Operator::RPar | Operator::ParGet | Operator::Call => 0,
+                Operator::Get => 1,
+                Operator::Neg | Operator::BoolNot => 2,
+                Operator::IntDiv | Operator::FloatDiv | Operator::Mul | Operator::Mod => 3,
+                Operator::Add | Operator::Sub => 4,
+                Operator::BitLsh | Operator::BitRsh | Operator::BitURsh => 5,
+                Operator::LessEquals
+                | Operator::LessThan
+                | Operator::GreaterEquals
+                | Operator::GreaterThan => 6,
+                Operator::Concat => 7,
+                Operator::Equals | Operator::NotEquals => 8,
+                Operator::BitAnd => 9,
+                Operator::BitXOr => 10,
+                Operator::BitOr => 11,
+                Operator::BoolAnd => 12,
+                Operator::BoolOr => 13,
+                Operator::Assign => 14,
+            }
+        }
+
+        fn is_left_assoc(&self) -> bool {
+            match self {
+                Operator::Neg | Operator::BoolNot | Operator::Assign => false,
+                _ => true,
+            }
+        }
     }
 
     impl Parser<'_> {
@@ -767,39 +872,216 @@ pub mod parser {
         }
     }
 
-    fn parse_operator(parser: &mut Parser) -> Result<Token, ParserError> {
-        if parser.accept(&Token::Minus(0)) {
-            let tk = parser.peek();
-            parser.eat()?;
-            Ok(tk)
+    fn parse_operator(
+        parser: &mut Parser,
+        previous: Option<Expression>,
+    ) -> Result<Option<Operator>, ParserError> {
+        let op = match parser.current {
+            Token::Add(_) => Operator::Add,
+            Token::Minus(_) => {
+                if previous.is_none() {
+                    Operator::Neg
+                } else {
+                    match previous.unwrap() {
+                        Expression::Operator(_) => Operator::Neg,
+                        _ => Operator::Sub,
+                    }
+                }
+            }
+            Token::Mul(_) => Operator::Mul,
+            Token::IntDiv(_) => Operator::IntDiv,
+            Token::FloatDiv(_) => Operator::FloatDiv,
+            Token::Mod(_) => Operator::Mod,
+            Token::BitOr(_) => Operator::BitOr,
+            Token::BitXOr(_) => Operator::BitXOr,
+            Token::BitAnd(_) => Operator::BitAnd,
+            Token::BitLsh(_) => Operator::BitLsh,
+            Token::BitRsh(_) => Operator::BitRsh,
+            Token::BitURsh(_) => Operator::BitURsh,
+            Token::BoolAnd(_) => Operator::BoolAnd,
+            Token::BoolOr(_) => Operator::BoolOr,
+            Token::BoolNot(_) => Operator::BoolNot,
+            Token::Assign(_) => Operator::Assign,
+            Token::LessEquals(_) => Operator::LessEquals,
+            Token::LessThan(_) => Operator::LessThan,
+            Token::GreaterEquals(_) => Operator::GreaterEquals,
+            Token::GreaterThan(_) => Operator::GreaterThan,
+            Token::Concat(_) => Operator::Concat,
+            Token::Equals(_) => Operator::Equals,
+            Token::NotEquals(_) => Operator::NotEquals,
+            Token::Get(_) => Operator::Get,
+            Token::LPar(_) => {
+                if previous.is_none() {
+                    Operator::LPar
+                } else {
+                    match previous.unwrap() {
+                        Expression::Operator(op) => match op {
+                            Operator::ParGet => Operator::Call,
+                            Operator::Call => Operator::Call,
+                            _ => Operator::LPar,
+                        },
+                        _ => Operator::Call,
+                    }
+                }
+            }
+            Token::RPar(_) => Operator::RPar,
+            Token::LBrack(_) => Operator::ParGet,
+            Token::RBrack(_) => return Ok(None),
+            _ => {
+                return Err(ParserError::NotAccepted(
+                    String::from("operator"),
+                    util::get_text_pos(parser.current.get_position(), parser.contents),
+                ));
+            }
+        };
+        parser.eat()?;
+        Ok(Some(op))
+    }
+
+    fn parse_element(
+        parser: &mut Parser,
+        previous: Option<Expression>,
+    ) -> Result<Option<Expression>, ParserError> {
+        if let Ok(opopt) = parse_operator(parser, previous) {
+            if let Some(op) = opopt {
+                Ok(Some(Expression::Operator(op)))
+            } else {
+                Ok(None)
+            }
         } else {
-            Err(ParserError::NotAccepted(
-                String::from("operator"),
-                util::get_text_pos(parser.current.get_position(), parser.contents),
-            ))
+            Ok(Some(parse_ex_primary(parser)?))
         }
     }
 
-    fn parse_element(parser: &mut Parser) -> Result<Expression, ParserError> {
-        if let Ok(op) = parse_operator(parser) {
-            Ok(Expression::Operator(op))
+    fn process_op(op: Operator, output: &mut Vec<Expression>) {
+        if op.is_binary() {
+            let rhs = output.pop().unwrap();
+            let lhs = output.pop().unwrap();
+            output.push(Expression::Binary(Box::from(lhs), Box::from(rhs), op));
         } else {
-            Ok(parse_ex_primary(parser)?)
+            let expr = output.pop().unwrap();
+            output.push(Expression::Unary(Box::from(expr), op));
         }
     }
 
     fn parse_ex(parser: &mut Parser) -> Result<Expression, ParserError> {
-        let mut output = Vec::new();
-        output.push(parse_element(parser)?);
+        let mut output: Vec<Expression> = Vec::new();
+        let mut opstack: Vec<Operator> = Vec::new();
+        let mut previous: Option<Expression> = None;
+
+        let mut open_pars: usize = 0;
+
+        let el = parse_element(parser, previous)?.unwrap();
+        previous = Some(el.clone());
+        match el {
+            Expression::Operator(op) => match op {
+                Operator::LPar => {
+                    open_pars += 1;
+                    opstack.push(op)
+                }
+                _ => opstack.push(op),
+            },
+            _ => output.push(el),
+        }
+
         while !(parser.accept(&Token::Semi(0))
             || parser.accept(&Token::Comma(0))
             || parser.accept(&Token::RBrace(0))
             || parser.accept(&Token::RBrack(0))
-            || parser.accept(&Token::RPar(0)))
+            || (parser.accept(&Token::RPar(0)) && open_pars == 0))
         {
-            output.push(parse_element(parser)?);
+            if let Some(el) = parse_element(parser, previous.clone())? {
+                previous = Some(el.clone());
+                let op: Operator = match el {
+                    Expression::Operator(op) => op,
+                    _ => {
+                        output.push(el);
+                        continue;
+                    }
+                };
+                match op {
+                    Operator::Neg | Operator::BoolNot => opstack.push(op),
+                    Operator::ParGet => {
+                        while !opstack.is_empty() {
+                            process_op(opstack.pop().unwrap(), &mut output);
+                        }
+                        let rhs = parse_ex(parser)?;
+                        parser.expect(&Token::RBrack(0))?;
+                        parser.eat()?;
+                        let lhs = output.pop().unwrap();
+                        output.push(Expression::Binary(
+                            Box::from(lhs),
+                            Box::from(rhs),
+                            Operator::Get,
+                        ));
+                    }
+                    Operator::Call => {
+                        while !opstack.is_empty() {
+                            process_op(opstack.pop().unwrap(), &mut output);
+                        }
+
+                        let mut args = Vec::new();
+                        if !parser.accept(&Token::RPar(0)) {
+                            args.push(Box::from(parse_ex(parser)?));
+                            while parser.accept(&Token::Comma(0)) {
+                                parser.eat()?;
+                                args.push(Box::from(parse_ex(parser)?));
+                            }
+                        }
+
+                        parser.expect(&Token::RPar(0))?;
+                        parser.eat()?;
+                        let lhs = output.pop().unwrap();
+                        output.push(Expression::Call(Box::from(lhs), args));
+                    }
+                    Operator::LPar => {
+                        open_pars += 1;
+                        opstack.push(op)
+                    }
+                    Operator::RPar => {
+                        open_pars -= 1;
+                        while !opstack.is_empty()
+                            && mem::discriminant(opstack.last().unwrap())
+                                != mem::discriminant(&Operator::LPar)
+                        {
+                            process_op(opstack.pop().unwrap(), &mut output);
+                        }
+                        if !opstack.is_empty()
+                            && mem::discriminant(opstack.last().unwrap())
+                                == mem::discriminant(&Operator::LPar)
+                        {
+                            opstack.pop();
+                        } else {
+                            return Err(ParserError::UnmatchedPar);
+                        }
+                    }
+                    _ => {
+                        while !opstack.is_empty()
+                            && mem::discriminant(opstack.last().unwrap())
+                                != mem::discriminant(&Operator::LPar)
+                            && (opstack.last().unwrap().precedence() < op.precedence()
+                                || (op.precedence() == opstack.last().unwrap().precedence()
+                                    && op.is_left_assoc()))
+                        {
+                            process_op(opstack.pop().unwrap(), &mut output);
+                        }
+                        opstack.push(op);
+                    }
+                }
+            } else {
+                continue;
+            }
         }
-        Ok(output[0].clone())
+
+        while !opstack.is_empty() {
+            let op: Operator = opstack.pop().unwrap();
+            process_op(op, &mut output);
+        }
+        if output.len() == 1 {
+            Ok(output[0].clone())
+        } else {
+            Err(ParserError::TooMuchOutput)
+        }
     }
 
     fn parse_st_block(parser: &mut Parser, braces: bool) -> Result<Statement, ParserError> {
