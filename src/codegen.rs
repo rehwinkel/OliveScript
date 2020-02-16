@@ -1,14 +1,17 @@
 use crate::parser::lexer::Token;
 use crate::parser::parser::{Expression, Operator, Statement};
 use crate::parser::util::ParserError;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug, Clone)]
 pub enum Code {
     PushString(String),
     PushBoolean(bool),
-    PushNone,
     PushFloat(f64),
     PushInt(u64),
+    NewBendy,
+    NewList,
+    PushNone,
     Return,
     Neg,
     Add,
@@ -27,9 +30,11 @@ pub enum Code {
     Concat,
     Store(String),
     Load(String),
+    TStore(usize),
+    TLoad(usize),
     Put,
     Get,
-
+    Call,
     BoolAnd,
     BoolOr,
     Equals,
@@ -38,8 +43,6 @@ pub enum Code {
     LessEquals,
     GreaterThan,
     GreaterEquals,
-    Assign,
-    Call,
 }
 
 trait Generate {
@@ -50,6 +53,8 @@ trait Generate {
         is_set: bool,
     ) -> Result<(), ParserError>;
 }
+
+static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 impl Generate for Expression {
     fn generate(
@@ -68,13 +73,13 @@ impl Generate for Expression {
                 Token::ValInt(_, i) => codes.push(Code::PushInt(*i)),
                 Token::Ident(_, name) => {
                     if is_load {
+                        codes.push(Code::PushString(name.clone()))
+                    } else {
                         if is_set {
                             codes.push(Code::Store(name.clone()))
                         } else {
                             codes.push(Code::Load(name.clone()))
                         }
-                    } else {
-                        codes.push(Code::PushString(name.clone()))
                     }
                 }
                 _ => return Err(ParserError::InvalidValue),
@@ -102,9 +107,17 @@ impl Generate for Expression {
                     Operator::BitOr => Code::BitOr,
                     Operator::BitXOr => Code::BitXOr,
                     Operator::Concat => Code::Concat,
+                    Operator::BoolAnd => Code::BoolAnd,
+                    Operator::BoolOr => Code::BoolOr,
+                    Operator::Equals => Code::Equals,
+                    Operator::NotEquals => Code::NotEquals,
+                    Operator::LessThan => Code::LessThan,
+                    Operator::LessEquals => Code::LessEquals,
+                    Operator::GreaterThan => Code::GreaterThan,
+                    Operator::GreaterEquals => Code::GreaterEquals,
                     Operator::Get => {
-                        rhs.generate(codes, false, false)?;
-                        lhs.generate(codes, true, false)?;
+                        rhs.generate(codes, true, false)?;
+                        lhs.generate(codes, false, false)?;
                         if is_set {
                             codes.push(Code::Put);
                         } else {
@@ -114,30 +127,49 @@ impl Generate for Expression {
                     }
                     Operator::Assign => {
                         rhs.generate(codes, false, false)?;
-                        lhs.generate(codes, true, true)?;
+                        lhs.generate(codes, false, true)?;
                         return Ok(());
                     }
                     _ => return Err(ParserError::InvalidValue),
-                    /*Operator::Equals => Code::Equals,
-                    Operator::NotEquals => Code::NotEquals,
-                    Operator::LessThan => Code::LessThan,
-                    Operator::LessEquals => Code::LessEquals,
-                    Operator::GreaterThan => Code::GreaterThan,
-                    Operator::GreaterEquals => Code::GreaterEquals,
-                    Operator::Get => Code::Get,
-                    Operator::ParGet => Code::ParGet,
-                    Operator::Call => Code::Call,*/
                 };
                 rhs.generate(codes, false, false)?;
                 lhs.generate(codes, false, false)?;
                 codes.push(code);
             }
+            Expression::Call(func, args) => {
+                for arg in args.iter().rev() {
+                    arg.generate(codes, false, false)?;
+                }
+                func.generate(codes, false, false)?;
+                codes.push(Code::Call);
+            }
+            Expression::NewList(args) => {
+                let cnt = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
+                codes.push(Code::NewList);
+                codes.push(Code::TStore(cnt));
+                for (i, arg) in args.iter().rev().enumerate() {
+                    arg.generate(codes, false, false)?;
+                    codes.push(Code::PushInt(i as u64));
+                    codes.push(Code::TLoad(cnt));
+                    codes.push(Code::Put);
+                }
+                codes.push(Code::TLoad(cnt));
+            }
+            Expression::NewBendy(args) => {
+                let cnt = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
+                codes.push(Code::NewBendy);
+                codes.push(Code::TStore(cnt));
+                for pair in args.iter().rev() {
+                    pair.value.generate(codes, false, false)?;
+                    codes.push(Code::PushString(pair.identifier.clone()));
+                    codes.push(Code::TLoad(cnt));
+                    codes.push(Code::Put);
+                }
+                codes.push(Code::TLoad(cnt));
+            }
             _ => unimplemented!(),
             /*
             Expression::NewFunc(Vec<Token>, Box<Statement>),
-            Expression::NewList(Vec<Expression>),
-            Expression::NewBendy(Vec<BendyPair>),
-            Expression::Call(Box<Expression>, Vec<Expression>),
             */
         }
         Ok(())
@@ -164,6 +196,12 @@ impl Generate for Statement {
             Statement::Expression(expr) => {
                 expr.generate(codes, false, false)?;
             }
+            /*
+            If(Box<Expression>, Box<Statement>, Option<Box<Statement>>),
+            While(Box<Expression>, Box<Statement>),
+            Continue,
+            Break,
+            */
             _ => unimplemented!(),
         }
         Ok(())

@@ -14,6 +14,7 @@ pub mod util {
         UnmatchedPar,
         TooMuchOutput,
         InvalidValue,
+        InvalidExpression,
     }
 
     impl Error for ParserError {}
@@ -40,6 +41,7 @@ pub mod util {
                 ParserError::UnmatchedPar => write!(f, "unmatched parenthesis"),
                 ParserError::TooMuchOutput => write!(f, "too many expressions on output stack"),
                 ParserError::InvalidValue => write!(f, "invalid value"),
+                ParserError::InvalidExpression => write!(f, "invalid expression"),
             }
         }
     }
@@ -605,8 +607,8 @@ pub mod parser {
 
     #[derive(Debug, Clone)]
     pub struct BendyPair {
-        identifier: Token,
-        value: Expression,
+        pub identifier: String,
+        pub value: Expression,
     }
 
     #[derive(Debug, Clone)]
@@ -829,7 +831,10 @@ pub mod parser {
                     parser.eat()?;
                     let expr = parse_ex(parser)?;
                     pairs.push(BendyPair {
-                        identifier: name,
+                        identifier: match name {
+                            Token::Ident(_, s) => s,
+                            _ => panic!(""),
+                        },
                         value: expr,
                     });
                     if !parser.accept(&Token::Comma(0)) {
@@ -1170,7 +1175,19 @@ pub mod parser {
             let expr = parse_ex(parser)?;
             parser.expect(&Token::Semi(0))?;
             parser.eat()?;
-            Ok(Statement::Expression(Box::from(expr)))
+            let valid = match &expr {
+                Expression::Call(_, _) => true,
+                Expression::Binary(_, _, op) => match op {
+                    Operator::Assign => true,
+                    _ => false,
+                },
+                _ => false,
+            };
+            if valid {
+                Ok(Statement::Expression(Box::from(expr)))
+            } else {
+                Err(ParserError::InvalidExpression)
+            }
         }
     }
 
