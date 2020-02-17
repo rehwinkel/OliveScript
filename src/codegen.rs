@@ -48,8 +48,10 @@ pub enum Code {
     GreaterEquals,
     JumpNot(usize),
     Goto(usize),
+    Break(usize),
 }
 
+#[derive(Clone)]
 pub struct NumberedCode {
     pos: usize,
     code: Code,
@@ -74,18 +76,19 @@ impl Code {
     }
 
     fn len(&self) -> usize {
+        let intsize = std::mem::size_of::<usize>();
         match self {
-            Code::PushString(_) => 1,
-            Code::PushBoolean(_) => 1,
-            Code::PushFloat(_) => 1,
-            Code::PushInt(_) => 1,
-            Code::NewFun(_, _) => 1,
+            Code::PushString(_) => 1 + intsize,
+            Code::PushBoolean(_) => 2,
+            Code::PushFloat(_) => 9,
+            Code::PushInt(_) => 9,
+            Code::NewFun(_, _) => 1, //TODO
             Code::Store(_) => 1,
             Code::Load(_) => 1,
             Code::TStore(_) => 1,
             Code::TLoad(_) => 1,
-            Code::JumpNot(_) => 1,
-            Code::Goto(_) => 1,
+            Code::JumpNot(_) => 1 + intsize,
+            Code::Goto(_) | Code::Break(_) => 1 + intsize,
             Code::PushNone => 1,
             Code::NewBendy => 1,
             Code::NewList => 1,
@@ -120,19 +123,9 @@ impl Code {
     }
 }
 
-trait Generate {
-    fn generate(
-        &self,
-        codes: &mut Vec<NumberedCode>,
-        counter: &mut AtomicUsize,
-        is_load: bool,
-        is_set: bool,
-    ) -> Result<(), ParserError>;
-}
-
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-impl Generate for Expression {
+impl Expression {
     fn generate(
         &self,
         codes: &mut Vec<NumberedCode>,
@@ -260,18 +253,18 @@ impl Generate for Expression {
     }
 }
 
-impl Generate for Statement {
+impl Statement {
     fn generate(
         &self,
         codes: &mut Vec<NumberedCode>,
         counter: &mut AtomicUsize,
-        _is_load: bool,
-        _is_set: bool,
+        while_start_index: usize,
+        while_end_index: usize,
     ) -> Result<(), ParserError> {
         match self {
             Statement::Block(sts) => {
                 for st in sts {
-                    st.generate(codes, counter, false, false)?;
+                    st.generate(codes, counter, while_start_index, while_end_index)?;
                 }
             }
             Statement::Return(expr) => {
@@ -285,7 +278,7 @@ impl Generate for Statement {
                 cond.generate(codes, counter, false, false)?;
                 let jumpindex = codes.len();
                 Code::JumpNot(0).push_code(codes, counter);
-                ifblock.generate(codes, counter, false, false)?;
+                ifblock.generate(codes, counter, while_start_index, while_end_index)?;
                 if let Some(block) = elseblock {
                     let gotoindex = codes.len();
                     Code::Goto(0).push_code(codes, counter);
@@ -293,7 +286,7 @@ impl Generate for Statement {
                         pos: codes[jumpindex].pos,
                         code: Code::JumpNot(codes.len()),
                     };
-                    block.generate(codes, counter, false, false)?;
+                    block.generate(codes, counter, while_start_index, while_end_index)?;
                     codes[gotoindex] = NumberedCode {
                         pos: codes[gotoindex].pos,
                         code: Code::Goto(codes.len()),
@@ -305,12 +298,24 @@ impl Generate for Statement {
                     };
                 }
             }
-            /*
-            While(Box<Expression>, Box<Statement>),
-            Continue,
-            Break,
-            */
-            _ => unimplemented!(),
+            Statement::While(cond, block) => {
+                let repeat_index = codes.len();
+                cond.generate(codes, counter, false, false)?;
+                let end_index = codes.len();
+                Code::JumpNot(0).push_code(codes, counter);
+                block.generate(codes, counter, repeat_index, end_index)?;
+                Code::Goto(repeat_index).push_code(codes, counter);
+                codes[end_index] = NumberedCode {
+                    pos: codes[end_index].pos,
+                    code: Code::JumpNot(codes.len()),
+                };
+            }
+            Statement::Continue => {
+                Code::Goto(while_start_index).push_code(codes, counter);
+            }
+            Statement::Break => {
+                Code::Break(while_end_index).push_code(codes, counter);
+            }
         }
         Ok(())
     }
@@ -319,21 +324,23 @@ impl Generate for Statement {
 pub fn generate_codes(block: Statement) -> Result<Vec<NumberedCode>, ParserError> {
     let mut codes = Vec::new();
     let mut counter = AtomicUsize::new(0);
-    block.generate(&mut codes, &mut counter, false, false)?;
-    /*
-    if codes.is_empty() {
-        Code::PushNone);
-        Code::Return);
-    } else {
-        match codes.last().unwrap() {
-            Code::Return => {}
-            _ => {
-                Code::PushNone);
-                Code::Return);
+    block.generate(&mut codes, &mut counter, 0, 0)?;
+    Code::PushNone.push_code(&mut codes, &mut counter);
+    Code::Return.push_code(&mut codes, &mut counter);
+    for (i, code) in codes.clone().into_iter().enumerate() {
+        match code.code {
+            Code::JumpNot(index) => codes[i].code = Code::JumpNot(codes[index].pos),
+            Code::Goto(index) => codes[i].code = Code::Goto(codes[index].pos),
+            Code::Break(index) => {
+                codes[i].code = if let Code::JumpNot(i) = codes[index].code {
+                    Code::Goto(i)
+                } else {
+                    panic!("")
+                }
             }
+            _ => {}
         }
     }
-    */
     Ok(codes)
 }
 
