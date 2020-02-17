@@ -10,7 +10,7 @@ pub enum Code {
     PushFloat(f64),
     PushInt(u64),
     PushNone,
-    NewFun(Vec<String>, Vec<Code>),
+    NewFun(Vec<String>, Vec<u8>),
     NewBendy,
     NewList,
     Return,
@@ -171,10 +171,10 @@ impl Generate for Expression {
                     }
                     codes.push(Code::TLoad(cnt));
                 }
-            },
+            }
             Expression::NewFunc(args, block) => {
                 codes.push(Code::NewFun(args.clone(), generate(*block.clone())?));
-            },
+            }
             _ => panic!(),
         }
         Ok(())
@@ -201,8 +201,10 @@ impl Generate for Statement {
             Statement::Expression(expr) => {
                 expr.generate(codes, false, false)?;
             }
+            Statement::If(cond, ifblock, elseblock) => {
+                cond.generate(codes, false, false)?;
+            }
             /*
-            If(Box<Expression>, Box<Statement>, Option<Box<Statement>>),
             While(Box<Expression>, Box<Statement>),
             Continue,
             Break,
@@ -213,10 +215,31 @@ impl Generate for Statement {
     }
 }
 
-pub fn generate(block: Statement) -> Result<Vec<Code>, ParserError> {
+pub fn generate_codes(block: Statement) -> Result<Vec<Code>, ParserError> {
     let mut codes = Vec::new();
     block.generate(&mut codes, false, false)?;
+    /*
+    if codes.is_empty() {
+        codes.push(Code::PushNone);
+        codes.push(Code::Return);
+    } else {
+        match codes.last().unwrap() {
+            Code::Return => {}
+            _ => {
+                codes.push(Code::PushNone);
+                codes.push(Code::Return);
+            }
+        }
+    }
+    */
     Ok(codes)
+}
+
+pub fn generate(block: Statement) -> Result<Vec<u8>, ParserError> {
+    let codes = generate_codes(block)?;
+    let bytes: Vec<u8> = vec![0];
+    //codes.iter().map(|code| code.to_bytes(&mut constants)).flat_map(|bytes| bytes).collect();
+    Ok(bytes)
 }
 
 #[cfg(test)]
