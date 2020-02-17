@@ -46,6 +46,8 @@ pub enum Code {
     LessEquals,
     GreaterThan,
     GreaterEquals,
+    JumpNot(usize),
+    Goto(usize),
 }
 
 pub struct NumberedCode {
@@ -60,11 +62,15 @@ impl Debug for NumberedCode {
 }
 
 impl Code {
-    fn push_code(&self, codes: &mut Vec<NumberedCode>, counter: &mut AtomicUsize) {
-        codes.push(NumberedCode {
+    fn get_code(&self, counter: &mut AtomicUsize) -> NumberedCode {
+        NumberedCode {
             pos: counter.fetch_add(self.len(), Ordering::SeqCst),
             code: self.clone(),
-        })
+        }
+    }
+
+    fn push_code(&self, codes: &mut Vec<NumberedCode>, counter: &mut AtomicUsize) {
+        codes.push(self.get_code(counter))
     }
 
     fn len(&self) -> usize {
@@ -73,8 +79,14 @@ impl Code {
             Code::PushBoolean(_) => 1,
             Code::PushFloat(_) => 1,
             Code::PushInt(_) => 1,
-            Code::PushNone => 1,
             Code::NewFun(_, _) => 1,
+            Code::Store(_) => 1,
+            Code::Load(_) => 1,
+            Code::TStore(_) => 1,
+            Code::TLoad(_) => 1,
+            Code::JumpNot(_) => 1,
+            Code::Goto(_) => 1,
+            Code::PushNone => 1,
             Code::NewBendy => 1,
             Code::NewList => 1,
             Code::Return => 1,
@@ -93,10 +105,6 @@ impl Code {
             Code::BitXOr => 1,
             Code::BoolNot => 1,
             Code::Concat => 1,
-            Code::Store(_) => 1,
-            Code::Load(_) => 1,
-            Code::TStore(_) => 1,
-            Code::TLoad(_) => 1,
             Code::Put => 1,
             Code::Get => 1,
             Code::Call => 1,
@@ -275,6 +283,27 @@ impl Generate for Statement {
             }
             Statement::If(cond, ifblock, elseblock) => {
                 cond.generate(codes, counter, false, false)?;
+                let jumpindex = codes.len();
+                Code::JumpNot(0).push_code(codes, counter);
+                ifblock.generate(codes, counter, false, false)?;
+                if let Some(block) = elseblock {
+                    let gotoindex = codes.len();
+                    Code::Goto(0).push_code(codes, counter);
+                    codes[jumpindex] = NumberedCode {
+                        pos: codes[jumpindex].pos,
+                        code: Code::JumpNot(codes.len()),
+                    };
+                    block.generate(codes, counter, false, false)?;
+                    codes[gotoindex] = NumberedCode {
+                        pos: codes[gotoindex].pos,
+                        code: Code::Goto(codes.len()),
+                    };
+                } else {
+                    codes[jumpindex] = NumberedCode {
+                        pos: codes[jumpindex].pos,
+                        code: Code::JumpNot(codes.len()),
+                    };
+                }
             }
             /*
             While(Box<Expression>, Box<Statement>),
