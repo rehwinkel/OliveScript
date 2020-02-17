@@ -1015,7 +1015,11 @@ pub mod parser {
                 match op {
                     Operator::Neg | Operator::BoolNot => opstack.push(op),
                     Operator::ParGet => {
-                        while !opstack.is_empty() {
+                        while !opstack.is_empty()
+                            && (opstack.last().unwrap().precedence() < op.precedence()
+                                || (op.precedence() == opstack.last().unwrap().precedence()
+                                    && op.is_left_assoc()))
+                        {
                             process_op(opstack.pop().unwrap(), &mut output);
                         }
                         let rhs = parse_ex(parser)?;
@@ -1029,7 +1033,11 @@ pub mod parser {
                         ));
                     }
                     Operator::Call => {
-                        while !opstack.is_empty() {
+                        while !opstack.is_empty()
+                            && (opstack.last().unwrap().precedence() < op.precedence()
+                                || (op.precedence() == opstack.last().unwrap().precedence()
+                                    && op.is_left_assoc()))
+                        {
                             process_op(opstack.pop().unwrap(), &mut output);
                         }
 
