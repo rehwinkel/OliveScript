@@ -64,6 +64,52 @@ impl Debug for NumberedCode {
 }
 
 impl Code {
+    fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            Code::PushString(_) => vec![1],
+            Code::PushBoolean(_) => vec![2],
+            Code::PushFloat(_) => vec![3],
+            Code::PushInt(_) => vec![4],
+            Code::NewFun(_, _) => vec![5],
+            Code::Store(_) => vec![6],
+            Code::Load(_) => vec![7],
+            Code::TStore(_) => vec![8],
+            Code::TLoad(_) => vec![9],
+            Code::JumpNot(_) => vec![10],
+            Code::Goto(_) | Code::Break(_) => vec![11],
+            Code::PushNone => vec![12],
+            Code::NewBendy => vec![13],
+            Code::NewList => vec![14],
+            Code::Return => vec![15],
+            Code::Neg => vec![16],
+            Code::Add => vec![17],
+            Code::Sub => vec![18],
+            Code::Mul => vec![19],
+            Code::IntDiv => vec![20],
+            Code::FloatDiv => vec![21],
+            Code::Mod => vec![22],
+            Code::BitLsh => vec![23],
+            Code::BitRsh => vec![24],
+            Code::BitURsh => vec![25],
+            Code::BitAnd => vec![26],
+            Code::BitOr => vec![27],
+            Code::BitXOr => vec![28],
+            Code::BoolNot => vec![29],
+            Code::Concat => vec![30],
+            Code::Put => vec![31],
+            Code::Get => vec![32],
+            Code::Call => vec![33],
+            Code::BoolAnd => vec![34],
+            Code::BoolOr => vec![35],
+            Code::Equals => vec![36],
+            Code::NotEquals => vec![37],
+            Code::LessThan => vec![38],
+            Code::LessEquals => vec![39],
+            Code::GreaterThan => vec![40],
+            Code::GreaterEquals => vec![41],
+        }
+    }
+
     fn get_code(&self, counter: &mut AtomicUsize) -> NumberedCode {
         NumberedCode {
             pos: counter.fetch_add(self.len(), Ordering::SeqCst),
@@ -345,13 +391,11 @@ pub fn generate_codes(block: Statement) -> Result<Vec<NumberedCode>, ParserError
 }
 
 pub fn generate(block: Statement) -> Result<Vec<u8>, ParserError> {
-    let codes = generate_codes(block)?;
-    for code in codes {
-        println!("{:?}", code);
-    }
-    let bytes: Vec<u8> = vec![0];
-    //codes.iter().map(|code| code.to_bytes(&mut constants)).flat_map(|bytes| bytes).collect();
-    Ok(bytes)
+    Ok(generate_codes(block)?
+        .iter()
+        .map(|code| code.code.to_bytes())
+        .flat_map(|bytes| bytes)
+        .collect())
 }
 
 #[cfg(test)]
