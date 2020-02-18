@@ -1,11 +1,33 @@
 use crate::parser::lexer::Token;
 use crate::parser::parser::{Expression, Operator, Statement};
-use crate::parser::util::ParserError;
 use indexmap::IndexSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::mem::transmute;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+pub mod util {
+    use std::error::Error;
+    use std::fmt::Display;
+    use std::fmt::Error as FmtError;
+    use std::fmt::Formatter;
+    #[derive(Debug)]
+    pub enum CodeGenError {
+        InvalidValue,
+    }
+
+    impl Error for CodeGenError {}
+
+    impl Display for CodeGenError {
+        fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
+            match self {
+                CodeGenError::InvalidValue => write!(f, "invalid value"),
+            }
+        }
+    }
+}
+
+use util::CodeGenError;
 
 #[derive(Debug, Clone)]
 pub enum Code {
@@ -220,7 +242,7 @@ impl Expression {
         is_load: bool,
         is_set: bool,
         constants: &mut IndexSet<String>,
-    ) -> Result<(), ParserError> {
+    ) -> Result<(), CodeGenError> {
         match self {
             Expression::Value(val) => match val {
                 Token::ValString(_, string) => {
@@ -242,14 +264,14 @@ impl Expression {
                         }
                     }
                 }
-                _ => return Err(ParserError::InvalidValue),
+                _ => return Err(CodeGenError::InvalidValue),
             },
             Expression::Unary(expr, op) => {
                 expr.generate(codes, counter, false, false, constants)?;
                 match op {
                     Operator::Neg => Code::Neg,
                     Operator::BoolNot => Code::BoolNot,
-                    _ => return Err(ParserError::InvalidValue),
+                    _ => return Err(CodeGenError::InvalidValue),
                 }
                 .push_code(codes, counter);
             }
@@ -291,7 +313,7 @@ impl Expression {
                         lhs.generate(codes, counter, false, true, constants)?;
                         return Ok(());
                     }
-                    _ => return Err(ParserError::InvalidValue),
+                    _ => return Err(CodeGenError::InvalidValue),
                 };
                 rhs.generate(codes, counter, false, false, constants)?;
                 lhs.generate(codes, counter, false, false, constants)?;
@@ -334,8 +356,11 @@ impl Expression {
                 }
             }
             Expression::NewFunc(args, block) => {
-                Code::NewFun(args.clone(), generate(*block.clone(), constants)?)
-                    .push_code(codes, counter);
+                Code::NewFun(
+                    args.clone(),
+                    to_bytes(generate(*block.clone(), constants)?, constants),
+                )
+                .push_code(codes, counter);
             }
             _ => panic!(),
         }
@@ -351,7 +376,7 @@ impl Statement {
         while_start_index: usize,
         while_end_index: usize,
         constants: &mut IndexSet<String>,
-    ) -> Result<(), ParserError> {
+    ) -> Result<(), CodeGenError> {
         match self {
             Statement::Block(sts) => {
                 for st in sts {
@@ -433,7 +458,7 @@ impl Statement {
 pub fn generate_codes(
     block: Statement,
     constants: &mut IndexSet<String>,
-) -> Result<Vec<NumberedCode>, ParserError> {
+) -> Result<Vec<NumberedCode>, CodeGenError> {
     let mut codes = Vec::new();
     let mut counter = AtomicUsize::new(0);
     block.generate(&mut codes, &mut counter, 0, 0, constants)?;

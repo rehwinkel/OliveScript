@@ -13,7 +13,6 @@ pub mod util {
         NotAccepted(String, String),
         UnmatchedPar,
         TooMuchOutput,
-        InvalidValue,
         InvalidExpression,
     }
 
@@ -40,7 +39,6 @@ pub mod util {
                 ),
                 ParserError::UnmatchedPar => write!(f, "unmatched parenthesis"),
                 ParserError::TooMuchOutput => write!(f, "too many expressions on output stack"),
-                ParserError::InvalidValue => write!(f, "invalid value"),
                 ParserError::InvalidExpression => write!(f, "invalid expression"),
             }
         }
