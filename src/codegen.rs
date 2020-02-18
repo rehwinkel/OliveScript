@@ -66,7 +66,7 @@ impl Debug for NumberedCode {
 }
 
 impl Code {
-    fn usize_to_bytes(val: usize) -> Vec<u8> {
+    pub fn usize_to_bytes(val: usize) -> Vec<u8> {
         let bytes: [u8; std::mem::size_of::<usize>()] = unsafe { transmute(val.to_le()) };
         bytes.to_vec()
     }

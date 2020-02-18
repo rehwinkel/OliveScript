@@ -12,10 +12,10 @@ fn main() -> Result<(), String> {
             fs::read_to_string(args[1].as_str()).map_err(|err| format!("{}", err))?;
 
         let block = parser::parser::parse(&contents).map_err(|err| format!("{}", err))?;
-        println!("{:?}", block);
         let mut constants = IndexSet::new();
         let codes = codegen::generate(block, &mut constants).map_err(|err| format!("{}", err))?;
-        println!("{:?}", codes);
+
+        //TODO Interpreter
         Ok(())
     } else {
         Err(String::from("argument required"))
