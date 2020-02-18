@@ -1,4 +1,5 @@
 mod codegen;
+mod interpreter;
 mod parser;
 
 use indexmap::IndexSet;
@@ -6,6 +7,7 @@ use std::env;
 use std::fs;
 
 fn main() -> Result<(), String> {
+    //TODO olvc -> run, olv -> parse, run
     let args: Vec<String> = env::args().collect();
     if args.len() == 2 {
         let contents: String =
@@ -15,7 +17,7 @@ fn main() -> Result<(), String> {
         let mut constants = IndexSet::new();
         let codes = codegen::generate(block, &mut constants).map_err(|err| format!("{}", err))?;
 
-        //TODO Interpreter
+        interpreter::run(&codes, &constants.iter().map(|s| s.clone()).collect());
         Ok(())
     } else {
         Err(String::from("argument required"))
