@@ -1,6 +1,7 @@
 use crate::parser::lexer::Token;
 use crate::parser::parser::{Expression, Operator, Statement};
 use crate::parser::util::ParserError;
+use indexmap::IndexSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -64,7 +65,7 @@ impl Debug for NumberedCode {
 }
 
 impl Code {
-    fn to_bytes(&self) -> Vec<u8> {
+    fn to_bytes(&self, constants: &mut IndexSet<String>) -> Vec<u8> {
         match self {
             Code::PushString(_) => vec![1],
             Code::PushBoolean(_) => vec![2],
@@ -178,6 +179,7 @@ impl Expression {
         counter: &mut AtomicUsize,
         is_load: bool,
         is_set: bool,
+        constants: &mut IndexSet<String>,
     ) -> Result<(), ParserError> {
         match self {
             Expression::Value(val) => match val {
@@ -203,7 +205,7 @@ impl Expression {
                 _ => return Err(ParserError::InvalidValue),
             },
             Expression::Unary(expr, op) => {
-                expr.generate(codes, counter, false, false)?;
+                expr.generate(codes, counter, false, false, constants)?;
                 match op {
                     Operator::Neg => Code::Neg,
                     Operator::BoolNot => Code::BoolNot,
@@ -235,8 +237,8 @@ impl Expression {
                     Operator::GreaterThan => Code::GreaterThan,
                     Operator::GreaterEquals => Code::GreaterEquals,
                     Operator::Get => {
-                        rhs.generate(codes, counter, true, false)?;
-                        lhs.generate(codes, counter, false, false)?;
+                        rhs.generate(codes, counter, true, false, constants)?;
+                        lhs.generate(codes, counter, false, false, constants)?;
                         if is_set {
                             Code::Put.push_code(codes, counter);
                         } else {
@@ -245,21 +247,21 @@ impl Expression {
                         return Ok(());
                     }
                     Operator::Assign => {
-                        rhs.generate(codes, counter, false, false)?;
-                        lhs.generate(codes, counter, false, true)?;
+                        rhs.generate(codes, counter, false, false, constants)?;
+                        lhs.generate(codes, counter, false, true, constants)?;
                         return Ok(());
                     }
                     _ => return Err(ParserError::InvalidValue),
                 };
-                rhs.generate(codes, counter, false, false)?;
-                lhs.generate(codes, counter, false, false)?;
+                rhs.generate(codes, counter, false, false, constants)?;
+                lhs.generate(codes, counter, false, false, constants)?;
                 code.push_code(codes, counter);
             }
             Expression::Call(func, args) => {
                 for arg in args.iter().rev() {
-                    arg.generate(codes, counter, false, false)?;
+                    arg.generate(codes, counter, false, false, constants)?;
                 }
-                func.generate(codes, counter, false, false)?;
+                func.generate(codes, counter, false, false, constants)?;
                 Code::Call.push_code(codes, counter);
             }
             Expression::NewList(args) => {
@@ -268,7 +270,7 @@ impl Expression {
                 if !args.is_empty() {
                     Code::TStore(cnt).push_code(codes, counter);
                     for (i, arg) in args.iter().enumerate() {
-                        arg.generate(codes, counter, false, false)?;
+                        arg.generate(codes, counter, false, false, constants)?;
                         Code::PushInt(i as u64).push_code(codes, counter);
                         Code::TLoad(cnt).push_code(codes, counter);
                         Code::Put.push_code(codes, counter);
@@ -282,7 +284,7 @@ impl Expression {
                 if !args.is_empty() {
                     Code::TStore(cnt).push_code(codes, counter);
                     for pair in args {
-                        pair.value.generate(codes, counter, false, false)?;
+                        pair.value.generate(codes, counter, false, false, constants)?;
                         Code::PushString(pair.identifier.clone()).push_code(codes, counter);
                         Code::TLoad(cnt).push_code(codes, counter);
                         Code::Put.push_code(codes, counter);
@@ -291,7 +293,7 @@ impl Expression {
                 }
             }
             Expression::NewFunc(args, block) => {
-                Code::NewFun(args.clone(), generate(*block.clone())?).push_code(codes, counter);
+                Code::NewFun(args.clone(), generate(*block.clone(), constants)?).push_code(codes, counter);
             }
             _ => panic!(),
         }
@@ -306,25 +308,26 @@ impl Statement {
         counter: &mut AtomicUsize,
         while_start_index: usize,
         while_end_index: usize,
+        constants: &mut IndexSet<String>,
     ) -> Result<(), ParserError> {
         match self {
             Statement::Block(sts) => {
                 for st in sts {
-                    st.generate(codes, counter, while_start_index, while_end_index)?;
+                    st.generate(codes, counter, while_start_index, while_end_index, constants)?;
                 }
             }
             Statement::Return(expr) => {
-                expr.generate(codes, counter, false, false)?;
+                expr.generate(codes, counter, false, false, constants)?;
                 Code::Return.push_code(codes, counter)
             }
             Statement::Expression(expr) => {
-                expr.generate(codes, counter, false, false)?;
+                expr.generate(codes, counter, false, false, constants)?;
             }
             Statement::If(cond, ifblock, elseblock) => {
-                cond.generate(codes, counter, false, false)?;
+                cond.generate(codes, counter, false, false, constants)?;
                 let jumpindex = codes.len();
                 Code::JumpNot(0).push_code(codes, counter);
-                ifblock.generate(codes, counter, while_start_index, while_end_index)?;
+                ifblock.generate(codes, counter, while_start_index, while_end_index, constants)?;
                 if let Some(block) = elseblock {
                     let gotoindex = codes.len();
                     Code::Goto(0).push_code(codes, counter);
@@ -332,7 +335,7 @@ impl Statement {
                         pos: codes[jumpindex].pos,
                         code: Code::JumpNot(codes.len()),
                     };
-                    block.generate(codes, counter, while_start_index, while_end_index)?;
+                    block.generate(codes, counter, while_start_index, while_end_index, constants)?;
                     codes[gotoindex] = NumberedCode {
                         pos: codes[gotoindex].pos,
                         code: Code::Goto(codes.len()),
@@ -346,10 +349,10 @@ impl Statement {
             }
             Statement::While(cond, block) => {
                 let repeat_index = codes.len();
-                cond.generate(codes, counter, false, false)?;
+                cond.generate(codes, counter, false, false, constants)?;
                 let end_index = codes.len();
                 Code::JumpNot(0).push_code(codes, counter);
-                block.generate(codes, counter, repeat_index, end_index)?;
+                block.generate(codes, counter, repeat_index, end_index, constants)?;
                 Code::Goto(repeat_index).push_code(codes, counter);
                 codes[end_index] = NumberedCode {
                     pos: codes[end_index].pos,
@@ -367,10 +370,13 @@ impl Statement {
     }
 }
 
-pub fn generate_codes(block: Statement) -> Result<Vec<NumberedCode>, ParserError> {
+pub fn generate_codes(
+    block: Statement,
+    constants: &mut IndexSet<String>,
+) -> Result<Vec<NumberedCode>, ParserError> {
     let mut codes = Vec::new();
     let mut counter = AtomicUsize::new(0);
-    block.generate(&mut codes, &mut counter, 0, 0)?;
+    block.generate(&mut codes, &mut counter, 0, 0, constants)?;
     Code::PushNone.push_code(&mut codes, &mut counter);
     Code::Return.push_code(&mut codes, &mut counter);
     for (i, code) in codes.clone().into_iter().enumerate() {
@@ -378,10 +384,8 @@ pub fn generate_codes(block: Statement) -> Result<Vec<NumberedCode>, ParserError
             Code::JumpNot(index) => codes[i].code = Code::JumpNot(codes[index].pos),
             Code::Goto(index) => codes[i].code = Code::Goto(codes[index].pos),
             Code::Break(index) => {
-                codes[i].code = if let Code::JumpNot(i) = codes[index].code {
-                    Code::Goto(i)
-                } else {
-                    panic!("")
+                if let Code::JumpNot(i) = codes[index].code {
+                    codes[i].code = Code::Goto(i)
                 }
             }
             _ => {}
@@ -390,10 +394,13 @@ pub fn generate_codes(block: Statement) -> Result<Vec<NumberedCode>, ParserError
     Ok(codes)
 }
 
-pub fn generate(block: Statement) -> Result<Vec<u8>, ParserError> {
-    Ok(generate_codes(block)?
+pub fn generate(
+    block: Statement,
+    constants: &mut IndexSet<String>,
+) -> Result<Vec<u8>, ParserError> {
+    Ok(generate_codes(block, constants)?
         .iter()
-        .map(|code| code.code.to_bytes())
+        .map(|code| code.code.to_bytes(constants))
         .flat_map(|bytes| bytes)
         .collect())
 }

@@ -13,3 +13,4 @@ name = "olvc"
 path = "src/main_compiler.rs"
 
 [dependencies]
+indexmap = "1.3.2"
