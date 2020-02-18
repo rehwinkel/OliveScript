@@ -46,7 +46,10 @@ fn main() -> Result<(), String> {
 
         let block = parser::parser::parse(&contents).map_err(|err| format!("{}", err))?;
         let mut constants = IndexSet::new();
-        let codes = codegen::generate(block, &mut constants).map_err(|err| format!("{}", err))?;
+        let codes = codegen::to_bytes(
+            codegen::generate(block, &mut constants).map_err(|err| format!("{}", err))?,
+            &mut constants,
+        );
 
         write_to_file(&outpath, &constants, &codes)?;
         Ok(())

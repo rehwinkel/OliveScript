@@ -455,7 +455,7 @@ impl Statement {
     }
 }
 
-pub fn generate_codes(
+pub fn generate(
     block: Statement,
     constants: &mut IndexSet<String>,
 ) -> Result<Vec<NumberedCode>, CodeGenError> {
@@ -479,21 +479,12 @@ pub fn generate_codes(
     Ok(codes)
 }
 
-pub fn generate(
-    block: Statement,
-    constants: &mut IndexSet<String>,
-) -> Result<Vec<u8>, ParserError> {
-    let codes = generate_codes(block, constants)?;
-    /*
-    for code in &codes {
-        println!("{:?}", code);
-    }
-    */
-    Ok(codes
+pub fn to_bytes(codes: Vec<NumberedCode>, constants: &mut IndexSet<String>) -> Vec<u8> {
+    codes
         .iter()
         .map(|code| code.code.to_bytes(constants))
         .flat_map(|bytes| bytes)
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]
