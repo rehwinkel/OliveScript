@@ -469,8 +469,8 @@ pub fn generate(
             Code::JumpNot(index) => codes[i].code = Code::JumpNot(codes[index].pos),
             Code::Goto(index) => codes[i].code = Code::Goto(codes[index].pos),
             Code::Break(index) => {
-                if let Code::JumpNot(i) = codes[index].code {
-                    codes[i].code = Code::Goto(i)
+                if let Code::JumpNot(j) = codes[index].code {
+                    codes[i].code = Code::Goto(j)
                 }
             }
             _ => {}
