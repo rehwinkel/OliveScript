@@ -17,7 +17,7 @@ fn main() -> Result<(), String> {
         let mut constants = IndexSet::new();
         let codes = codegen::generate(block, &mut constants).map_err(|err| format!("{}", err))?;
 
-        interpreter::run(&codes, &constants.iter().map(|s| s.clone()).collect());
+        interpreter::run(&codegen::to_bytes(codes, &mut constants), &constants.iter().map(|s| s.clone()).collect());
         Ok(())
     } else {
         Err(String::from("argument required"))
