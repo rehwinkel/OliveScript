@@ -364,31 +364,29 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                 lhs.push_str(rhs.as_str());
                 push!(Object::Str(lhs));
             }
-            31 => {
-                match *stack.pop().unwrap().borrow_mut() {
-                    Object::Bendy(ref mut map) => {
-                        let key = pop_string(&mut stack)?;
-                        let val = stack.pop().unwrap();
-                        map.insert(key, val);
-                    }
-                    Object::List(ref mut vec) => {
-                        let key = pop_int(&mut stack)?;
-                        let val = stack.pop().unwrap();
-                        if key >= 0 {
-                            let i: usize = key as usize;
-                            while i+1 > vec.len() {
-                                vec.push(Rc::new(RefCell::new(Object::None)));
-                            }
-                            vec[key as usize] = val;
-                        } else {
-                            return Err(RuntimeError::KeyError(key.to_string()));
+            31 => match *stack.pop().unwrap().borrow_mut() {
+                Object::Bendy(ref mut map) => {
+                    let key = pop_string(&mut stack)?;
+                    let val = stack.pop().unwrap();
+                    map.insert(key, val);
+                }
+                Object::List(ref mut vec) => {
+                    let key = pop_int(&mut stack)?;
+                    let val = stack.pop().unwrap();
+                    if key >= 0 {
+                        let i: usize = key as usize;
+                        while i + 1 > vec.len() {
+                            vec.push(Rc::new(RefCell::new(Object::None)));
                         }
-                    }
-                    _ => {
-                        return Err(RuntimeError::TypeError);
+                        vec[key as usize] = val;
+                    } else {
+                        return Err(RuntimeError::KeyError(key.to_string()));
                     }
                 }
-            }
+                _ => {
+                    return Err(RuntimeError::TypeError);
+                }
+            },
             32 => match &*stack.pop().unwrap().borrow() {
                 Object::Bendy(map) => {
                     let key = pop_string(&mut stack)?;
@@ -401,7 +399,11 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                 Object::List(vec) => {
                     let key = pop_int(&mut stack)?;
                     if key >= 0 {
-                        stack.push(Rc::clone(&vec[key as usize]));
+                        if let Some(val) = vec.get(key as usize) {
+                            stack.push(Rc::clone(&val));
+                        } else {
+                            return Err(RuntimeError::KeyError(key.to_string()));
+                        }
                     } else {
                         return Err(RuntimeError::KeyError(key.to_string()));
                     }
