@@ -1,10 +1,10 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::mem::transmute;
 use std::rc::Rc;
-use std::cell::RefCell;
 
 #[derive(Debug)]
 enum Object {
@@ -74,7 +74,8 @@ impl Object {
                         let lk: Vec<&String> = l.keys().collect();
                         let l2k: Vec<&String> = l2.keys().collect();
                         for i in 0..l.len() {
-                            if lk[i] != l2k[i] || !l[lk[i]].borrow().equals(Rc::clone(&l2[l2k[i]])) {
+                            if lk[i] != l2k[i] || !l[lk[i]].borrow().equals(Rc::clone(&l2[l2k[i]]))
+                            {
                                 return false;
                             }
                         }
@@ -364,22 +365,51 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                 push!(Object::Str(lhs));
             }
             31 => {
-                if let Object::Bendy(ref mut map) = *stack.pop().unwrap().borrow_mut() {
-                    let key = pop_string(&mut stack)?;
-                    let val = stack.pop().unwrap();
-                    map.insert(key, val);
+                match *stack.pop().unwrap().borrow_mut() {
+                    Object::Bendy(ref mut map) => {
+                        let key = pop_string(&mut stack)?;
+                        let val = stack.pop().unwrap();
+                        map.insert(key, val);
+                    }
+                    Object::List(ref mut vec) => {
+                        let key = pop_int(&mut stack)?;
+                        let val = stack.pop().unwrap();
+                        if key >= 0 {
+                            let i: usize = key as usize;
+                            while i+1 > vec.len() {
+                                vec.push(Rc::new(RefCell::new(Object::None)));
+                            }
+                            vec[key as usize] = val;
+                        } else {
+                            return Err(RuntimeError::KeyError(key.to_string()));
+                        }
+                    }
+                    _ => {
+                        return Err(RuntimeError::TypeError);
+                    }
                 }
             }
-            32 => {
-                if let Object::Bendy(map) = &*stack.pop().unwrap().borrow() {
+            32 => match &*stack.pop().unwrap().borrow() {
+                Object::Bendy(map) => {
                     let key = pop_string(&mut stack)?;
                     if let Some(val) = map.get(&key) {
-                        stack.push(Rc::clone(val)); 
+                        stack.push(Rc::clone(val));
                     } else {
                         return Err(RuntimeError::KeyError(key));
                     }
                 }
-            }
+                Object::List(vec) => {
+                    let key = pop_int(&mut stack)?;
+                    if key >= 0 {
+                        stack.push(Rc::clone(&vec[key as usize]));
+                    } else {
+                        return Err(RuntimeError::KeyError(key.to_string()));
+                    }
+                }
+                _ => {
+                    return Err(RuntimeError::TypeError);
+                }
+            },
             34 => {
                 let a = pop_boolable(&mut stack)?;
                 let b = pop_boolable(&mut stack)?;
