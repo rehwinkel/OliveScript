@@ -72,6 +72,7 @@ pub enum Code {
     JumpNot(usize),
     Goto(usize),
     Break(usize),
+    Pop,
 }
 
 #[derive(Clone)]
@@ -168,6 +169,7 @@ impl Code {
             Code::LessEquals => vec![39],
             Code::GreaterThan => vec![40],
             Code::GreaterEquals => vec![41],
+            Code::Pop => vec![42],
         }
     }
 
@@ -225,6 +227,7 @@ impl Code {
             Code::LessEquals => 1,
             Code::GreaterThan => 1,
             Code::GreaterEquals => 1,
+            Code::Pop => 1,
         }
     }
 }
@@ -401,6 +404,9 @@ impl Statement {
             }
             Statement::Expression(expr) => {
                 expr.generate(codes, counter, false, false, constants)?;
+                if let Expression::Call(_, _) = &**expr {
+                    Code::Pop.push_code(codes, counter);
+                }
             }
             Statement::If(cond, ifblock, elseblock) => {
                 cond.generate(codes, counter, false, false, constants)?;

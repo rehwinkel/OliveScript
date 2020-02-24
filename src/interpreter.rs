@@ -15,6 +15,7 @@ enum Object {
     Bendy(HashMap<String, Rc<RefCell<Object>>>),
     List(Vec<Rc<RefCell<Object>>>),
     Func(Vec<String>, Vec<u8>),
+    Frame(usize, Vec<u8>),
     None,
 }
 
@@ -108,6 +109,7 @@ impl Object {
                     false
                 }
             }
+            Object::Frame(_, _) => panic!("forbidden type"),
         }
     }
 
@@ -152,6 +154,7 @@ impl Object {
                 }
                 string + ")"
             }
+            Object::Frame(_, _) => panic!("forbidden type"),
         }
     }
 }
@@ -201,6 +204,16 @@ fn pop_string(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<String, RuntimeErr
     }
 }
 
+fn pop_function(
+    stack: &mut Vec<Rc<RefCell<Object>>>,
+) -> Result<(Vec<String>, Vec<u8>), RuntimeError> {
+    if let Object::Func(args, codes) = &*stack.pop().unwrap().borrow() {
+        Ok((args.clone(), codes.clone()))
+    } else {
+        Err(RuntimeError::TypeError)
+    }
+}
+
 fn pop_stringable(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<String, RuntimeError> {
     Ok((&*stack.pop().unwrap().borrow()).to_string())
 }
@@ -215,12 +228,78 @@ fn pop_boolable(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<bool, RuntimeErr
         Object::List(v) => v.len() > 0,
         Object::Bendy(m) => m.len() > 0,
         Object::Func(_, _) => true,
+        Object::Frame(_, _) => panic!("forbidden type"),
     })
 }
 
-pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError> {
+#[derive(Debug)]
+struct Scope {
+    parent: Option<Box<Scope>>,
+    locvars: HashMap<String, Rc<RefCell<Object>>>,
+    args: Vec<String>,
+}
+
+impl Scope {
+    fn new() -> Self {
+        Scope {
+            parent: None,
+            locvars: HashMap::new(),
+            args: Vec::new(),
+        }
+    }
+    fn from(parent: Scope, args: Vec<String>) -> Self {
+        Scope {
+            parent: Some(Box::new(parent)),
+            locvars: HashMap::new(),
+            args,
+        }
+    }
+
+    fn put(&mut self, name: String, val: Rc<RefCell<Object>>) {
+        if self.args.contains(&name) {
+            self.locvars.insert(name, val); // write in this
+        } else {
+            if let Some(ref mut parent_scope) = &mut self.parent {
+                if parent_scope.has(name.clone()) {
+                    parent_scope.put(name, val); // write in parent
+                } else {
+                    self.locvars.insert(name, val); // write in this
+                }
+            } else {
+                self.locvars.insert(name, val); // write in this
+            }
+        }
+    }
+
+    fn get(&self, name: String) -> Result<Rc<RefCell<Object>>, RuntimeError> {
+        if let Some(val) = self.locvars.get(&name) {
+            Ok(Rc::clone(val))
+        } else {
+            if let Some(parent_scope) = &self.parent {
+                Ok(parent_scope.get(name)?)
+            } else {
+                Err(RuntimeError::KeyError(name))
+            }
+        }
+    }
+
+    fn has(&self, name: String) -> bool {
+        let keys: Vec<&String> = self.locvars.keys().collect();
+        if keys.contains(&&name) {
+            true
+        } else {
+            if let Some(parent_scope) = &self.parent {
+                parent_scope.has(name)
+            } else {
+                false
+            }
+        }
+    }
+}
+
+pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError> {
     let mut stack: Vec<Rc<RefCell<Object>>> = Vec::new();
-    let mut locvars: HashMap<String, Rc<RefCell<Object>>> = HashMap::new();
+    let mut scope = Scope::new();
 
     macro_rules! push {
         ($e: expr) => {
@@ -228,8 +307,11 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
         };
     }
 
+    push!(Object::Func(Vec::new(), in_codes));
+    let mut codes = vec![33_u8];
+
     let mut ip: usize = 0;
-    loop {
+    while ip < codes.len() {
         let code = codes[ip];
         ip += 1;
         match code {
@@ -276,18 +358,14 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                 let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
                 ip += s;
                 let name = constants[val].clone();
-                locvars.insert(name, stack.pop().unwrap());
+                scope.put(name, stack.pop().unwrap());
             }
             7 => {
                 let s = std::mem::size_of::<usize>();
                 let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
                 ip += s;
                 let name = constants[val].clone();
-                if let Some(val) = locvars.get(&name) {
-                    stack.push(Rc::clone(val));
-                } else {
-                    return Err(RuntimeError::KeyError(name));
-                }
+                stack.push(Rc::clone(&scope.get(name)?));
             }
             10 => {
                 let s = std::mem::size_of::<usize>();
@@ -306,7 +384,15 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
             13 => push!(Object::Bendy(HashMap::new())),
             14 => push!(Object::List(Vec::new())),
             15 => {
-                println!("{:?}", stack.pop().unwrap().borrow()); //TODO
+                let return_val = stack.pop().unwrap();
+                if let Object::Frame(new_ip, new_codes) = &*stack.pop().unwrap().borrow() {
+                    ip = *new_ip;
+                    codes = new_codes.clone();
+                    scope = *scope.parent.unwrap();
+                    stack.push(return_val);
+                } else {
+                    panic!("broken call stack");
+                }
             }
             16 => {
                 let rhs = stack.pop().unwrap();
@@ -447,6 +533,17 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                     return Err(RuntimeError::TypeError);
                 }
             },
+            33 => {
+                let (f_args, f_codes) = pop_function(&mut stack)?;
+                scope = Scope::from(scope, f_args.clone());
+                for arg in f_args {
+                    let val = stack.pop().unwrap();
+                    scope.put(arg.clone(), val)
+                }
+                push!(Object::Frame(ip, codes));
+                ip = 0;
+                codes = f_codes;
+            }
             34 => {
                 let a = pop_boolable(&mut stack)?;
                 let b = pop_boolable(&mut stack)?;
@@ -516,10 +613,12 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                     _ => return Err(RuntimeError::TypeError),
                 };
             }
+            42 => {
+                stack.pop();
+            }
             _ => panic!("unexpected code: {:?}", code),
         }
     }
-    /*
-    Code::Call => vec![33],
-    */
+    println!("module: {:?}", stack.pop().unwrap().borrow());
+    Ok(())
 }
