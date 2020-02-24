@@ -4,7 +4,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::mem::transmute;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Object {
     Str(String),
     Bool(bool),
@@ -112,13 +112,17 @@ impl Object {
 #[derive(Debug)]
 pub enum RuntimeError {
     TypeError,
+    KeyError(String),
 }
 
 impl Error for RuntimeError {}
 
 impl Display for RuntimeError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "type error: {:?}", self)
+        match self {
+            RuntimeError::TypeError => write!(f, "type error: {:?}", self),
+            RuntimeError::KeyError(key) => write!(f, "key error: {}", key),
+        }
     }
 }
 
@@ -136,6 +140,14 @@ fn bytes_to_usize(val: [u8; std::mem::size_of::<usize>()]) -> usize {
 
 fn pop_int(stack: &mut Vec<Object>) -> Result<i64, RuntimeError> {
     if let Object::Int(i) = stack.pop().unwrap() {
+        Ok(i)
+    } else {
+        Err(RuntimeError::TypeError)
+    }
+}
+
+fn pop_string(stack: &mut Vec<Object>) -> Result<String, RuntimeError> {
+    if let Object::Str(i) = stack.pop().unwrap() {
         Ok(i)
     } else {
         Err(RuntimeError::TypeError)
@@ -170,6 +182,7 @@ fn pop_boolable(stack: &mut Vec<Object>) -> Result<bool, RuntimeError> {
 
 pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError> {
     let mut stack: Vec<Object> = Vec::new();
+    let mut locvars: HashMap<String, Object> = HashMap::new();
 
     let mut ip: usize = 0;
     loop {
@@ -213,6 +226,24 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                 let codes: Vec<u8> = codes[ip..ip + codelen].to_vec();
                 ip += codelen;
                 stack.push(Object::Func(args, codes));
+            }
+            6 => {
+                let s = std::mem::size_of::<usize>();
+                let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
+                ip += s;
+                let name = constants[val].clone();
+                locvars.insert(name, stack.pop().unwrap());
+            }
+            7 => {
+                let s = std::mem::size_of::<usize>();
+                let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
+                ip += s;
+                let name = constants[val].clone();
+                if let Some(val) = locvars.get(&name) {
+                    stack.push(val.clone()); //TODO clone ok?
+                } else {
+                    return Err(RuntimeError::KeyError(name));
+                }
             }
             10 => {
                 let s = std::mem::size_of::<usize>();
@@ -324,6 +355,23 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                 lhs.push_str(rhs.as_str());
                 stack.push(Object::Str(lhs));
             }
+            31 => {
+                if let Object::Bendy(ref mut map) = stack.pop().unwrap() {
+                    let key = pop_string(&mut stack)?;
+                    let val = stack.pop().unwrap();
+                    map.insert(key, val);
+                }
+            }
+            32 => {
+                if let Object::Bendy(map) = stack.pop().unwrap() {
+                    let key = pop_string(&mut stack)?;
+                    if let Some(val) = map.get(&key) {
+                        stack.push(val.clone()); //TODO Clone ok?
+                    } else {
+                        return Err(RuntimeError::KeyError(key));
+                    }
+                }
+            }
             34 => {
                 let a = pop_boolable(&mut stack)?;
                 let b = pop_boolable(&mut stack)?;
@@ -393,20 +441,10 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                     _ => return Err(RuntimeError::TypeError),
                 }
             }
-            _ => println!("Error: {:?}", code),
+            _ => panic!("unexpected code: {:?}", code),
         }
     }
     /*
-    Code::Store(name) => {
-        let index = constants.insert_full(name.clone()).0;
-        [vec![6], Code::usize_to_bytes(index)].concat()
-    }
-    Code::Load(name) => {
-        let index = constants.insert_full(name.clone()).0;
-        [vec![7], Code::usize_to_bytes(index)].concat()
-    }
-    Code::Put => vec![31],
-    Code::Get => vec![32],
     Code::Call => vec![33],
     */
 }
