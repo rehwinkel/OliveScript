@@ -1,8 +1,8 @@
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::mem::transmute;
-use std::collections::HashMap;
 
 #[derive(Debug)]
 enum Object {
@@ -13,6 +13,78 @@ enum Object {
     Bendy(HashMap<String, Object>),
     List(Vec<Object>),
     None,
+}
+
+impl Object {
+    fn equals(&self, other: &Object) -> bool {
+        match self {
+            Object::None => {
+                if let Object::None = other {
+                    true
+                } else {
+                    false
+                }
+            }
+            Object::Bool(b) => {
+                if let Object::Bool(b2) = other {
+                    b == b2
+                } else {
+                    false
+                }
+            }
+            Object::Str(s) => {
+                if let Object::Str(s2) = other {
+                    s == s2
+                } else {
+                    false
+                }
+            }
+            Object::Int(i) => match other {
+                Object::Int(j) => i == j,
+                Object::Float(j) => *i as f64 == *j,
+                _ => false,
+            },
+            Object::Float(i) => match other {
+                Object::Int(j) => *i == *j as f64,
+                Object::Float(j) => i == j,
+                _ => false,
+            },
+            Object::List(l) => {
+                if let Object::List(l2) = other {
+                    if l.len() == l2.len() {
+                        for i in 0..l.len() {
+                            if !l[i].equals(&l2[i]) {
+                                return false;
+                            }
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            Object::Bendy(l) => {
+                if let Object::Bendy(l2) = other {
+                    if l.len() == l2.len() {
+                        let lk: Vec<&String> = l.keys().collect();
+                        let l2k: Vec<&String> = l2.keys().collect();
+                        for i in 0..l.len() {
+                            if lk[i] != l2k[i] || !l[lk[i]].equals(&l2[l2k[i]]) {
+                                return false;
+                            }
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -40,20 +112,6 @@ fn bytes_to_usize(val: [u8; std::mem::size_of::<usize>()]) -> usize {
     unsafe { transmute::<[u8; std::mem::size_of::<usize>()], usize>(val) }
 }
 
-impl Object {
-    fn to_string(&self) -> String {
-        match self {
-            Object::Str(s) => s.clone(),
-            Object::Bool(b) => b.to_string(),
-            Object::Int(i) => i.to_string(),
-            Object::Float(f) => format!("{:.5}", f),
-            Object::None => String::from("none"),
-            Object::List(v) => format!("{:?}", v),
-            Object::Bendy(m) => format!("{:?}", m),
-        }
-    }
-}
-
 fn pop_int(stack: &mut Vec<Object>) -> Result<i64, RuntimeError> {
     if let Object::Int(i) = stack.pop().unwrap() {
         Ok(i)
@@ -62,34 +120,34 @@ fn pop_int(stack: &mut Vec<Object>) -> Result<i64, RuntimeError> {
     }
 }
 
-fn pop_float(stack: &mut Vec<Object>) -> Result<f64, RuntimeError> {
-    if let Object::Float(f) = stack.pop().unwrap() {
-        Ok(f)
-    } else {
-        Err(RuntimeError::TypeError)
-    }
+fn pop_stringable(stack: &mut Vec<Object>) -> Result<String, RuntimeError> {
+    Ok(match stack.pop().unwrap() {
+        Object::Str(s) => s.clone(),
+        Object::Bool(b) => b.to_string(),
+        Object::Int(i) => i.to_string(),
+        Object::Float(f) => format!("{:.5}", f),
+        Object::None => String::from("none"),
+        Object::List(v) => format!("{:?}", v),
+        Object::Bendy(m) => format!("{:?}", m),
+    })
 }
 
-fn pop_bool(stack: &mut Vec<Object>) -> Result<bool, RuntimeError> {
-    if let Object::Bool(b) = stack.pop().unwrap() {
-        Ok(b)
-    } else {
-        Err(RuntimeError::TypeError)
-    }
-}
-
-fn pop_string(stack: &mut Vec<Object>) -> Result<String, RuntimeError> {
-    if let Object::Str(s) = stack.pop().unwrap() {
-        Ok(s)
-    } else {
-        Err(RuntimeError::TypeError)
-    }
+fn pop_boolable(stack: &mut Vec<Object>) -> Result<bool, RuntimeError> {
+    Ok(match stack.pop().unwrap() {
+        Object::Str(s) => s.len() > 0,
+        Object::Bool(b) => b,
+        Object::Int(i) => i != 0,
+        Object::Float(f) => f != 0.0,
+        Object::None => false,
+        Object::List(v) => v.len() > 0,
+        Object::Bendy(m) => m.len() > 0,
+    })
 }
 
 pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError> {
     let mut stack: Vec<Object> = Vec::new();
 
-    let mut ip = 0;
+    let mut ip: usize = 0;
     loop {
         let code = codes[ip];
         ip += 1;
@@ -115,11 +173,24 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                 ip += 8;
                 stack.push(Object::Int(val));
             }
+            10 => {
+                let s = std::mem::size_of::<usize>();
+                let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
+                ip += s;
+                if !pop_boolable(&mut stack)? {
+                    ip = val;
+                }
+            }
+            11 => {
+                let s = std::mem::size_of::<usize>();
+                let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
+                ip = val;
+            }
             12 => stack.push(Object::None),
             13 => stack.push(Object::Bendy(HashMap::new())),
             14 => stack.push(Object::List(Vec::new())),
             15 => {
-                println!("{:?}", stack.pop().unwrap());
+                println!("{:?}", stack.pop().unwrap()); //TODO
             }
             16 => {
                 let rhs = stack.pop().unwrap();
@@ -130,7 +201,7 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                     Object::Float(x) => {
                         stack.push(Object::Float(-x));
                     }
-                    _ => panic!("type error"),
+                    _ => return Err(RuntimeError::TypeError),
                 }
             }
             17 | 18 | 19 | 20 | 21 | 22 => {
@@ -160,7 +231,7 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                                 _ => panic!(),
                             });
                         }
-                        _ => panic!("type error"),
+                        _ => return Err(RuntimeError::TypeError),
                     },
                     Object::Float(x) => match rhs {
                         Object::Int(y) => {
@@ -185,9 +256,9 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                                 _ => panic!(),
                             });
                         }
-                        _ => panic!("type error"),
+                        _ => return Err(RuntimeError::TypeError),
                     },
-                    _ => panic!("type error"),
+                    _ => return Err(RuntimeError::TypeError),
                 }
             }
             23 | 24 | 25 | 26 | 27 | 28 => {
@@ -203,26 +274,83 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                 });
             }
             29 => {
-                let v = !pop_bool(&mut stack)?;
+                let v = !pop_boolable(&mut stack)?;
                 stack.push(Object::Bool(v));
             }
             30 => {
-                let lhs = stack.pop().unwrap();
-                let rhs = stack.pop().unwrap();
-                let mut s1 = lhs.to_string();
-                s1.push_str(rhs.to_string().as_str());
-                stack.push(Object::Str(s1));
+                let mut lhs = pop_stringable(&mut stack)?;
+                let rhs = pop_stringable(&mut stack)?;
+                lhs.push_str(rhs.as_str());
+                stack.push(Object::Str(lhs));
             }
             34 => {
-                println!("stack: {:?}", stack);
-                let a = pop_bool(&mut stack)?;
-                let b = pop_bool(&mut stack)?;
+                let a = pop_boolable(&mut stack)?;
+                let b = pop_boolable(&mut stack)?;
                 stack.push(Object::Bool(a && b));
             }
             35 => {
-                let a = pop_bool(&mut stack)?;
-                let b = pop_bool(&mut stack)?;
+                let a = pop_boolable(&mut stack)?;
+                let b = pop_boolable(&mut stack)?;
                 stack.push(Object::Bool(a || b));
+            }
+            36 => {
+                let lhs = stack.pop().unwrap();
+                let rhs = stack.pop().unwrap();
+                stack.push(Object::Bool(lhs.equals(&rhs)));
+            }
+            37 => {
+                let lhs = stack.pop().unwrap();
+                let rhs = stack.pop().unwrap();
+                stack.push(Object::Bool(!lhs.equals(&rhs)));
+            }
+            38 | 39 | 40 | 41 => {
+                let lhs = stack.pop().unwrap();
+                let rhs = stack.pop().unwrap();
+                match lhs {
+                    Object::Int(x) => match rhs {
+                        Object::Int(y) => {
+                            stack.push(match code {
+                                38 => Object::Bool(x < y),
+                                39 => Object::Bool(x <= y),
+                                40 => Object::Bool(x > y),
+                                41 => Object::Bool(x >= y),
+                                _ => panic!(),
+                            });
+                        }
+                        Object::Float(y) => {
+                            stack.push(match code {
+                                38 => Object::Bool((x as f64) < y),
+                                39 => Object::Bool(x as f64 <= y),
+                                40 => Object::Bool(x as f64 > y),
+                                41 => Object::Bool(x as f64 >= y),
+                                _ => panic!(),
+                            });
+                        }
+                        _ => return Err(RuntimeError::TypeError),
+                    },
+                    Object::Float(x) => match rhs {
+                        Object::Int(y) => {
+                            stack.push(match code {
+                                38 => Object::Bool(x < y as f64),
+                                39 => Object::Bool(x <= y as f64),
+                                40 => Object::Bool(x > y as f64),
+                                41 => Object::Bool(x >= y as f64),
+                                _ => panic!(),
+                            });
+                        }
+                        Object::Float(y) => {
+                            stack.push(match code {
+                                38 => Object::Bool(x < y),
+                                39 => Object::Bool(x <= y),
+                                40 => Object::Bool(x > y),
+                                41 => Object::Bool(x >= y),
+                                _ => panic!(),
+                            });
+                        }
+                        _ => return Err(RuntimeError::TypeError),
+                    },
+                    _ => return Err(RuntimeError::TypeError),
+                }
             }
             _ => println!("Error: {:?}", code),
         }
@@ -254,16 +382,8 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
         let index = constants.insert_full(format!("<{}>", i)).0;
         [vec![7], Code::usize_to_bytes(index)].concat()
     }
-    Code::JumpNot(p) => [vec![10], Code::usize_to_bytes(*p)].concat(),
-    Code::Goto(p) | Code::Break(p) => [vec![11], Code::usize_to_bytes(*p)].concat(),
     Code::Put => vec![31],
     Code::Get => vec![32],
     Code::Call => vec![33],
-    Code::Equals => vec![36],
-    Code::NotEquals => vec![37],
-    Code::LessThan => vec![38],
-    Code::LessEquals => vec![39],
-    Code::GreaterThan => vec![40],
-    Code::GreaterEquals => vec![41],
     */
 }
