@@ -110,6 +110,50 @@ impl Object {
             }
         }
     }
+
+    fn to_string(&self) -> String {
+        match self {
+            Object::Str(s) => s.clone(),
+            Object::Bool(b) => b.to_string(),
+            Object::Int(i) => i.to_string(),
+            Object::Float(f) => format!("{:.5}", f),
+            Object::None => String::from("none"),
+            Object::List(v) => {
+                let mut string = String::from("[");
+                if v.len() > 0 {
+                    string += format!("{}", (*v[0].borrow()).to_string()).as_str();
+                    for value in &v[1..] {
+                        string += format!(", {}", (*value.borrow()).to_string()).as_str();
+                    }
+                }
+                string + "]"
+            }
+            Object::Bendy(m) => {
+                let mut string = String::from("{");
+                if m.len() > 0 {
+                    let keys: Vec<&String> = m.keys().collect();
+                    string +=
+                        format!("{}: {}", keys[0], (*m[keys[0]].borrow()).to_string()).as_str();
+                    for key in &keys[1..] {
+                        let value = &m[*key];
+                        string += format!(", {}: {}", key, (*value.borrow()).to_string()).as_str();
+                    }
+                }
+                string + "}"
+            }
+            Object::Func(args, _) => {
+                let mut string = String::from("func(");
+                if args.len() > 0 {
+                    string += args[0].as_str();
+                    for value in &args[1..] {
+                        string += ", ";
+                        string += value.as_str();
+                    }
+                }
+                string + ")"
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -158,16 +202,7 @@ fn pop_string(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<String, RuntimeErr
 }
 
 fn pop_stringable(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<String, RuntimeError> {
-    Ok(match &*stack.pop().unwrap().borrow() {
-        Object::Str(s) => s.clone(),
-        Object::Bool(b) => b.to_string(),
-        Object::Int(i) => i.to_string(),
-        Object::Float(f) => format!("{:.5}", f),
-        Object::None => String::from("none"),
-        Object::List(v) => format!("{:?}", v),
-        Object::Bendy(m) => format!("{:?}", m),
-        Object::Func(args, _) => format!("func({:?})", args),
-    })
+    Ok((&*stack.pop().unwrap().borrow()).to_string())
 }
 
 fn pop_boolable(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<bool, RuntimeError> {
