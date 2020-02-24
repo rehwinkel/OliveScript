@@ -12,6 +12,7 @@ enum Object {
     Float(f64),
     Bendy(HashMap<String, Object>),
     List(Vec<Object>),
+    Func(Vec<String>, Vec<u8>),
     None,
 }
 
@@ -83,6 +84,27 @@ impl Object {
                     false
                 }
             }
+            Object::Func(args, codes) => {
+                if let Object::Func(args2, codes2) = other {
+                    if args.len() == args.len() && codes.len() == codes2.len() {
+                        for i in 0..args.len() {
+                            if args[i] != args2[i] {
+                                return false;
+                            }
+                        }
+                        for i in 0..codes.len() {
+                            if codes[i] != codes2[i] {
+                                return false;
+                            }
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
         }
     }
 }
@@ -129,6 +151,7 @@ fn pop_stringable(stack: &mut Vec<Object>) -> Result<String, RuntimeError> {
         Object::None => String::from("none"),
         Object::List(v) => format!("{:?}", v),
         Object::Bendy(m) => format!("{:?}", m),
+        Object::Func(args, _) => format!("func({:?})", args),
     })
 }
 
@@ -141,6 +164,7 @@ fn pop_boolable(stack: &mut Vec<Object>) -> Result<bool, RuntimeError> {
         Object::None => false,
         Object::List(v) => v.len() > 0,
         Object::Bendy(m) => m.len() > 0,
+        Object::Func(_, _) => true,
     })
 }
 
@@ -172,6 +196,23 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
                 let val = bytes_to_i64(codes[ip..ip + 8].try_into().expect(""));
                 ip += 8;
                 stack.push(Object::Int(val));
+            }
+            5 => {
+                let s = std::mem::size_of::<usize>();
+                let arglen = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
+                ip += s;
+                let args: Vec<String> = (0..arglen)
+                    .map(|_| {
+                        let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
+                        ip += s;
+                        constants[val].clone()
+                    })
+                    .collect();
+                let codelen = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
+                ip += s;
+                let codes: Vec<u8> = codes[ip..ip + codelen].to_vec();
+                ip += codelen;
+                stack.push(Object::Func(args, codes));
             }
             10 => {
                 let s = std::mem::size_of::<usize>();
@@ -356,30 +397,12 @@ pub fn run(codes: &Vec<u8>, constants: &Vec<String>) -> Result<(), RuntimeError>
         }
     }
     /*
-    Code::NewFun(args, codes) => {
-        let arglen = Code::usize_to_bytes(args.len());
-        let argindices: Vec<u8> = args
-            .iter()
-            .map(|arg| Code::usize_to_bytes(constants.insert_full(arg.clone()).0))
-            .flat_map(|bytes| bytes)
-            .collect();
-        let codeslen = Code::usize_to_bytes(codes.len());
-        [vec![5], arglen, argindices, codeslen, codes.clone()].concat()
-    }
     Code::Store(name) => {
         let index = constants.insert_full(name.clone()).0;
         [vec![6], Code::usize_to_bytes(index)].concat()
     }
     Code::Load(name) => {
         let index = constants.insert_full(name.clone()).0;
-        [vec![7], Code::usize_to_bytes(index)].concat()
-    }
-    Code::TStore(i) => {
-        let index = constants.insert_full(format!("<{}>", i)).0;
-        [vec![6], Code::usize_to_bytes(index)].concat()
-    }
-    Code::TLoad(i) => {
-        let index = constants.insert_full(format!("<{}>", i)).0;
         [vec![7], Code::usize_to_bytes(index)].concat()
     }
     Code::Put => vec![31],
