@@ -1010,7 +1010,7 @@ pub mod parser {
                         output.push(Expression::Binary(
                             Box::from(lhs),
                             Box::from(rhs),
-                            Operator::Get,
+                            Operator::ParGet,
                         ));
                     }
                     Operator::Call => {

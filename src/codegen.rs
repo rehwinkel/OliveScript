@@ -304,6 +304,16 @@ impl Expression {
                         }
                         return Ok(());
                     }
+                    Operator::ParGet => {
+                        rhs.generate(codes, counter, false, false, constants)?;
+                        lhs.generate(codes, counter, false, false, constants)?;
+                        if is_set {
+                            Code::Put.push_code(codes, counter);
+                        } else {
+                            Code::Get.push_code(codes, counter);
+                        }
+                        return Ok(());
+                    }
                     Operator::Assign => {
                         rhs.generate(codes, counter, false, false, constants)?;
                         lhs.generate(codes, counter, false, true, constants)?;
