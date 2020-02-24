@@ -236,7 +236,6 @@ fn pop_boolable(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<bool, RuntimeErr
 struct Scope {
     parent: Option<Box<Scope>>,
     locvars: HashMap<String, Rc<RefCell<Object>>>,
-    args: Vec<String>,
 }
 
 impl Scope {
@@ -244,19 +243,18 @@ impl Scope {
         Scope {
             parent: None,
             locvars: HashMap::new(),
-            args: Vec::new(),
         }
     }
-    fn from(parent: Scope, args: Vec<String>) -> Self {
+    
+    fn from(parent: Scope) -> Self {
         Scope {
             parent: Some(Box::new(parent)),
             locvars: HashMap::new(),
-            args,
         }
     }
 
     fn put(&mut self, name: String, val: Rc<RefCell<Object>>) {
-        if self.args.contains(&name) {
+        if self.has(name.clone()) {
             self.locvars.insert(name, val); // write in this
         } else {
             if let Some(ref mut parent_scope) = &mut self.parent {
@@ -535,7 +533,7 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
             },
             33 => {
                 let (f_args, f_codes) = pop_function(&mut stack)?;
-                scope = Scope::from(scope, f_args.clone());
+                scope = Scope::from(scope);
                 for arg in f_args {
                     let val = stack.pop().unwrap();
                     scope.put(arg.clone(), val)

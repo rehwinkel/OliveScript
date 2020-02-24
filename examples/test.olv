@@ -1,0 +1,20 @@
+fibonacci_iter = fun(n) {
+    fibos = new [0, 1];
+    i = 2;
+    while (i < n+1) {
+        fibos[i] = fibos[i-1] + fibos[i-2];
+        i = i + 1;
+    }
+    return fibos[n];
+};
+
+fibonacci_rec = fun(n) {
+    if (n < 2) {
+        return n;
+    } else {
+        return fibonacci_rec(n-1) + fibonacci_rec(n-2);
+    }
+};
+
+return fibonacci_rec(10);
+return fibonacci_iter(10);
