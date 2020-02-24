@@ -34,7 +34,7 @@ pub enum Code {
     PushString(String),
     PushBoolean(bool),
     PushFloat(f64),
-    PushInt(u64),
+    PushInt(i64),
     PushNone,
     NewFun(Vec<String>, Vec<u8>),
     NewBendy,
@@ -49,7 +49,6 @@ pub enum Code {
     Mod,
     BitLsh,
     BitRsh,
-    BitURsh,
     BitAnd,
     BitOr,
     BitXOr,
@@ -93,8 +92,8 @@ impl Code {
         bytes.to_vec()
     }
 
-    fn u64_to_bytes(val: u64) -> Vec<u8> {
-        let bytes: [u8; std::mem::size_of::<u64>()] = unsafe { transmute(val.to_le()) };
+    fn i64_to_bytes(val: i64) -> Vec<u8> {
+        let bytes: [u8; std::mem::size_of::<i64>()] = unsafe { transmute(val.to_le()) };
         bytes.to_vec()
     }
 
@@ -111,7 +110,7 @@ impl Code {
             }
             Code::PushBoolean(b) => vec![2, *b as u8],
             Code::PushFloat(f) => [vec![3], Code::f64_to_bytes(*f)].concat(),
-            Code::PushInt(i) => [vec![4], Code::u64_to_bytes(*i)].concat(),
+            Code::PushInt(i) => [vec![4], Code::i64_to_bytes(*i)].concat(),
             Code::Store(name) => {
                 let index = constants.insert_full(name.clone()).0;
                 [vec![6], Code::usize_to_bytes(index)].concat()
@@ -153,7 +152,6 @@ impl Code {
             Code::Mod => vec![22],
             Code::BitLsh => vec![23],
             Code::BitRsh => vec![24],
-            Code::BitURsh => vec![25],
             Code::BitAnd => vec![26],
             Code::BitOr => vec![27],
             Code::BitXOr => vec![28],
@@ -211,7 +209,6 @@ impl Code {
             Code::Mod => 1,
             Code::BitLsh => 1,
             Code::BitRsh => 1,
-            Code::BitURsh => 1,
             Code::BitAnd => 1,
             Code::BitOr => 1,
             Code::BitXOr => 1,
@@ -285,7 +282,6 @@ impl Expression {
                     Operator::Mod => Code::Mod,
                     Operator::BitLsh => Code::BitLsh,
                     Operator::BitRsh => Code::BitRsh,
-                    Operator::BitURsh => Code::BitURsh,
                     Operator::BitAnd => Code::BitAnd,
                     Operator::BitOr => Code::BitOr,
                     Operator::BitXOr => Code::BitXOr,
@@ -333,7 +329,7 @@ impl Expression {
                     Code::TStore(cnt).push_code(codes, counter);
                     for (i, arg) in args.iter().enumerate() {
                         arg.generate(codes, counter, false, false, constants)?;
-                        Code::PushInt(i as u64).push_code(codes, counter);
+                        Code::PushInt(i as i64).push_code(codes, counter);
                         Code::TLoad(cnt).push_code(codes, counter);
                         Code::Put.push_code(codes, counter);
                     }

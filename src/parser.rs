@@ -100,7 +100,7 @@ pub mod lexer {
         ValFalse(usize),
         ValNone(usize),
         ValFloat(usize, f64),
-        ValInt(usize, u64),
+        ValInt(usize, i64),
         ValString(usize, String),
         // punctuation
         LPar(usize),
@@ -122,7 +122,6 @@ pub mod lexer {
         BitAnd(usize),
         BitLsh(usize),
         BitRsh(usize),
-        BitURsh(usize),
         IntDiv(usize),
         FloatDiv(usize),
         Concat(usize),
@@ -178,7 +177,6 @@ pub mod lexer {
                 Token::BitAnd(pos) => pos,
                 Token::BitLsh(pos) => pos,
                 Token::BitRsh(pos) => pos,
-                Token::BitURsh(pos) => pos,
                 Token::Concat(pos) => pos,
                 Token::IntDiv(pos) => pos,
                 Token::FloatDiv(pos) => pos,
@@ -271,7 +269,7 @@ pub mod lexer {
         } else {
             Token::ValInt(
                 position,
-                current_token.parse::<u64>().map_err(|_| {
+                current_token.parse::<i64>().map_err(|_| {
                     ParserError::NumberFormat(util::get_text_pos(position, text), current_token)
                 })?,
             )
@@ -453,18 +451,7 @@ pub mod lexer {
                         } == '>'
                         {
                             iterator.next();
-                            if match get_char(iterator) {
-                                Ok((_, ch)) => ch,
-                                Err(_) => {
-                                    return Ok(Token::BitRsh(position));
-                                }
-                            } == '>'
-                            {
-                                iterator.next();
-                                Token::BitURsh(position)
-                            } else {
-                                Token::BitRsh(position)
-                            }
+                            Token::BitRsh(position)
                         } else {
                             Token::GreaterThan(position)
                         },
@@ -571,7 +558,6 @@ pub mod lexer {
             assert_eq!(run_lexer("&"), Token::BitAnd(0), "BitAnd");
             assert_eq!(run_lexer("<<"), Token::BitLsh(0), "BitLsh");
             assert_eq!(run_lexer(">>"), Token::BitRsh(0), "BitRsh");
-            assert_eq!(run_lexer(">>>"), Token::BitURsh(0), "BitURsh");
             assert_eq!(run_lexer("$"), Token::Concat(0), "Concat");
             assert_eq!(run_lexer("//"), Token::IntDiv(0), "IntDiv");
             assert_eq!(run_lexer("/"), Token::FloatDiv(0), "FloatDiv");
@@ -643,7 +629,6 @@ pub mod parser {
         Mod,
         BitLsh,
         BitRsh,
-        BitURsh,
         BitAnd,
         BitOr,
         BitXOr,
@@ -679,7 +664,6 @@ pub mod parser {
                 | Operator::BitAnd
                 | Operator::BitLsh
                 | Operator::BitRsh
-                | Operator::BitURsh
                 | Operator::Concat
                 | Operator::BoolAnd
                 | Operator::BoolOr
@@ -706,7 +690,7 @@ pub mod parser {
                 Operator::Neg | Operator::BoolNot => 2,
                 Operator::IntDiv | Operator::FloatDiv | Operator::Mul | Operator::Mod => 3,
                 Operator::Add | Operator::Sub => 4,
-                Operator::BitLsh | Operator::BitRsh | Operator::BitURsh => 5,
+                Operator::BitLsh | Operator::BitRsh => 5,
                 Operator::LessEquals
                 | Operator::LessThan
                 | Operator::GreaterEquals
@@ -908,7 +892,6 @@ pub mod parser {
             Token::BitAnd(_) => Operator::BitAnd,
             Token::BitLsh(_) => Operator::BitLsh,
             Token::BitRsh(_) => Operator::BitRsh,
-            Token::BitURsh(_) => Operator::BitURsh,
             Token::BoolAnd(_) => Operator::BoolAnd,
             Token::BoolOr(_) => Operator::BoolOr,
             Token::BoolNot(_) => Operator::BoolNot,
