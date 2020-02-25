@@ -14,7 +14,6 @@ bit_arithmetic = fun(a, b) {
     print(a & b); # and
     print(a << b); # left shift
     print(a >> b); # right shift
-    print(a >>> b); # unsigned right shift
 };
 
 # integers
@@ -25,12 +24,8 @@ float = 23.751;
 pi = 3.1415;
 
 # bitwise arithmetic
-bit_arithmetic(int, float);
-bit_arithmetic(int, one_to_nine);
-bit_arithmetic(int, pi);
-bit_arithmetic(float, one_to_nine);
-bit_arithmetic(float, pi);
-bit_arithmetic(one_to_nine, pi);
+bit_arithmetic(int, 2);
+bit_arithmetic(int, 3);
 
 # "regular" arithmetic
 basic_arithmetic(int, float);
