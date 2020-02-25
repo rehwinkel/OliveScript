@@ -7,6 +7,7 @@ use interpreter::{bytes_to_u16, bytes_to_u32};
 use std::convert::TryInto;
 use std::env;
 use std::fs;
+use std::path::Path;
 
 fn read_from_bytes(bytes: Vec<u8>) -> Result<(Vec<u8>, Vec<String>), String> {
     let mut current = 4;
@@ -32,7 +33,10 @@ fn read_from_bytes(bytes: Vec<u8>) -> Result<(Vec<u8>, Vec<String>), String> {
 fn main() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
     if args.len() == 2 {
-        let bytes = fs::read(args[1].as_str()).map_err(|err| format!("{}", err))?;
+        let path = Path::new(args[1].as_str());
+        env::set_current_dir(path.parent().unwrap().join(".")).map_err(|err| format!("{}", err))?;        
+
+        let bytes = fs::read(path.file_name().unwrap()).map_err(|err| format!("{}", err))?;
         if &bytes[..4] == [0xCE, 0xDA, 0xFA, 0xBA] {
             let (codes, constants) = read_from_bytes(bytes)?;
             interpreter::run(codes, constants).map_err(|err| format!("{}", err))?;

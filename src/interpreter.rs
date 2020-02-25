@@ -1,10 +1,14 @@
+use libloading::{Library, Symbol};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::env;
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::mem::transmute;
 use std::rc::Rc;
+
+type NativeFunc = fn(Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>, RuntimeError>;
 
 #[derive(Debug)]
 pub enum Object {
@@ -17,7 +21,7 @@ pub enum Object {
     Func(Vec<String>, Vec<u8>),
     Frame(usize, Vec<u8>),
     None,
-    NFunc(usize, fn(Vec<Rc<RefCell<Object>>>) -> Result<Rc<RefCell<Object>>, RuntimeError>),
+    NFunc(usize, NativeFunc),
 }
 
 impl Object {
@@ -173,6 +177,7 @@ impl Object {
 pub enum RuntimeError {
     TypeError,
     KeyError(String),
+    ImportError(String),
 }
 
 impl Error for RuntimeError {}
@@ -182,6 +187,7 @@ impl Display for RuntimeError {
         match self {
             RuntimeError::TypeError => write!(f, "type error: {:?}", self),
             RuntimeError::KeyError(key) => write!(f, "key error: {}", key),
+            RuntimeError::ImportError(err) => write!(f, "import error: {}", err),
         }
     }
 }
@@ -299,12 +305,12 @@ impl Scope {
     }
 }
 
-fn n_print(args: Vec<Rc<RefCell<Object>>>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
+fn n_print(args: Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
     println!("{}", args[0].borrow().to_string());
     Ok(Rc::new(RefCell::new(Object::None)))
 }
 
-fn n_list_len(args: Vec<Rc<RefCell<Object>>>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
+fn n_list_len(args: Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
     Ok(Rc::new(RefCell::new(Object::Int(
         match &*args[0].borrow() {
             Object::List(v) => v.len(),
@@ -315,6 +321,26 @@ fn n_list_len(args: Vec<Rc<RefCell<Object>>>) -> Result<Rc<RefCell<Object>>, Run
     ))))
 }
 
+fn n_import(args: Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
+    if let Object::Str(name) = &*args[0].borrow() {
+        //TODO import all kinds of modules properly
+        let lib_path = env::current_dir()
+            .expect("no current dir")
+            .join(format!("lib{}.so", name));
+        println!("Importing: {:?}", &lib_path);
+        let lib =
+            Library::new(lib_path).map_err(|err| RuntimeError::ImportError(format!("{}", err)))?;
+        unsafe {
+            let func: Symbol<NativeFunc> = lib.get(b"n_sqrt").unwrap();
+            let result = func(Box::new(Vec::new()))?;
+            println!("result: {:?}", result);
+        }
+        Ok(Rc::new(RefCell::new(Object::None)))
+    } else {
+        Err(RuntimeError::TypeError)
+    }
+}
+
 fn insert_builtin_funcs(scope: &mut Scope) {
     scope.put(
         "print".to_string(),
@@ -323,6 +349,10 @@ fn insert_builtin_funcs(scope: &mut Scope) {
     scope.put(
         "len".to_string(),
         Rc::new(RefCell::new(Object::NFunc(1, n_list_len))),
+    );
+    scope.put(
+        "import".to_string(),
+        Rc::new(RefCell::new(Object::NFunc(1, n_import))),
     );
 }
 
@@ -574,7 +604,7 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
                         let val = stack.pop().unwrap();
                         args.push(val);
                     }
-                    stack.push(fp(args)?);
+                    stack.push(fp(Box::new(args))?);
                 }
                 _ => return Err(RuntimeError::TypeError),
             },

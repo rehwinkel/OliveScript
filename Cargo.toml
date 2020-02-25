@@ -18,3 +18,4 @@ path = "src/lib.rs"
 
 [dependencies]
 indexmap = "1.3.2"
+libloading = "0.5.2"

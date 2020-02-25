@@ -29,8 +29,9 @@ fn main() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
     if args.len() == 2 {
         let path = Path::new(args[1].as_str());
-        let outpath = format!("{}c", path.file_name().unwrap().to_str().unwrap());
-        let contents: String = fs::read_to_string(path).map_err(|err| format!("{}", err))?;
+        env::set_current_dir(path.parent().unwrap().join(".")).map_err(|err| format!("{}", err))?;
+        let outpath = format!("{}.olvc", path.file_stem().unwrap().to_str().unwrap());
+        let contents: String = fs::read_to_string(path.file_name().unwrap()).map_err(|err| format!("{}", err))?;
 
         let block = parser::parser::parse(&contents).map_err(|err| format!("{}", err))?;
         let mut constants = IndexSet::new();
