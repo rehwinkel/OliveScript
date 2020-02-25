@@ -685,8 +685,11 @@ pub mod parser {
 
         fn precedence(&self) -> usize {
             match self {
-                Operator::LPar | Operator::RPar | Operator::ParGet | Operator::Call => 0,
-                Operator::Get => 1,
+                Operator::LPar
+                | Operator::RPar
+                | Operator::ParGet
+                | Operator::Call
+                | Operator::Get => 0,
                 Operator::Neg | Operator::BoolNot => 2,
                 Operator::IntDiv | Operator::FloatDiv | Operator::Mul | Operator::Mod => 3,
                 Operator::Add | Operator::Sub => 4,
@@ -1178,6 +1181,7 @@ pub mod parser {
             if valid {
                 Ok(Statement::Expression(Box::from(expr)))
             } else {
+                println!("shat {:?}", expr);
                 Err(ParserError::InvalidExpression)
             }
         }
