@@ -17,6 +17,7 @@ enum Object {
     Func(Vec<String>, Vec<u8>),
     Frame(usize, Vec<u8>),
     None,
+    NFunc(usize, fn(Vec<Rc<RefCell<Object>>>) -> Rc<RefCell<Object>>),
 }
 
 impl Object {
@@ -109,6 +110,14 @@ impl Object {
                     false
                 }
             }
+
+            Object::NFunc(arglen, fp) => {
+                if let Object::NFunc(arglen2, fp2) = &*other.borrow() {
+                    arglen == arglen2 && fp == fp2
+                } else {
+                    false
+                }
+            }
             Object::Frame(_, _) => panic!("forbidden type"),
         }
     }
@@ -154,6 +163,7 @@ impl Object {
                 }
                 string + ")"
             }
+            Object::NFunc(arglen, _) => format!("nfunc({})", arglen),
             Object::Frame(_, _) => panic!("forbidden type"),
         }
     }
@@ -177,7 +187,7 @@ impl Display for RuntimeError {
 }
 
 fn bytes_to_i64(val: [u8; 8]) -> i64 {
-    unsafe { transmute::<[u8; 8], i64>(val) }
+    unsafe { transmute::<[u8; 8], i64>(val) }.to_le()
 }
 
 fn bytes_to_f64(val: [u8; 8]) -> f64 {
@@ -185,7 +195,7 @@ fn bytes_to_f64(val: [u8; 8]) -> f64 {
 }
 
 fn bytes_to_usize(val: [u8; std::mem::size_of::<usize>()]) -> usize {
-    unsafe { transmute::<[u8; std::mem::size_of::<usize>()], usize>(val) }
+    unsafe { transmute::<[u8; std::mem::size_of::<usize>()], usize>(val) }.to_le()
 }
 
 fn pop_int(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<i64, RuntimeError> {
@@ -199,16 +209,6 @@ fn pop_int(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<i64, RuntimeError> {
 fn pop_string(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<String, RuntimeError> {
     if let Object::Str(i) = &*stack.pop().unwrap().borrow() {
         Ok(i.clone())
-    } else {
-        Err(RuntimeError::TypeError)
-    }
-}
-
-fn pop_function(
-    stack: &mut Vec<Rc<RefCell<Object>>>,
-) -> Result<(Vec<String>, Vec<u8>), RuntimeError> {
-    if let Object::Func(args, codes) = &*stack.pop().unwrap().borrow() {
-        Ok((args.clone(), codes.clone()))
     } else {
         Err(RuntimeError::TypeError)
     }
@@ -228,6 +228,7 @@ fn pop_boolable(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<bool, RuntimeErr
         Object::List(v) => v.len() > 0,
         Object::Bendy(m) => m.len() > 0,
         Object::Func(_, _) => true,
+        Object::NFunc(_, _) => true,
         Object::Frame(_, _) => panic!("forbidden type"),
     })
 }
@@ -245,7 +246,6 @@ impl Scope {
             locvars: HashMap::new(),
         }
     }
-    
     fn from(parent: Scope) -> Self {
         Scope {
             parent: Some(Box::new(parent)),
@@ -295,6 +295,11 @@ impl Scope {
     }
 }
 
+fn n_print(args: Vec<Rc<RefCell<Object>>>) -> Rc<RefCell<Object>> {
+    println!("{}", args[0].borrow().to_string());
+    Rc::new(RefCell::new(Object::None))
+}
+
 pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError> {
     let mut stack: Vec<Rc<RefCell<Object>>> = Vec::new();
     let mut scope = Scope::new();
@@ -306,6 +311,10 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
     }
 
     push!(Object::Func(Vec::new(), in_codes));
+    scope.put(
+        String::from("print"),
+        Rc::new(RefCell::new(Object::NFunc(1, n_print))),
+    );
     let mut codes = vec![33_u8];
 
     let mut ip: usize = 0;
@@ -531,17 +540,27 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
                     return Err(RuntimeError::TypeError);
                 }
             },
-            33 => {
-                let (f_args, f_codes) = pop_function(&mut stack)?;
-                scope = Scope::from(scope);
-                for arg in f_args {
-                    let val = stack.pop().unwrap();
-                    scope.put(arg.clone(), val)
+            33 => match &*stack.pop().unwrap().borrow() {
+                Object::Func(f_args, f_codes) => {
+                    scope = Scope::from(scope);
+                    for arg in f_args {
+                        let val = stack.pop().unwrap();
+                        scope.put(arg.clone(), val)
+                    }
+                    push!(Object::Frame(ip, codes));
+                    ip = 0;
+                    codes = f_codes.clone();
                 }
-                push!(Object::Frame(ip, codes));
-                ip = 0;
-                codes = f_codes;
-            }
+                Object::NFunc(arglen, fp) => {
+                    let mut args = Vec::with_capacity(*arglen);
+                    for _ in 0..*arglen {
+                        let val = stack.pop().unwrap();
+                        args.push(val);
+                    }
+                    stack.push(fp(args));
+                }
+                _ => return Err(RuntimeError::TypeError),
+            },
             34 => {
                 let a = pop_boolable(&mut stack)?;
                 let b = pop_boolable(&mut stack)?;
