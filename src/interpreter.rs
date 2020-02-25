@@ -7,7 +7,7 @@ use std::mem::transmute;
 use std::rc::Rc;
 
 #[derive(Debug)]
-enum Object {
+pub enum Object {
     Str(String),
     Bool(bool),
     Int(i64),
@@ -17,11 +17,11 @@ enum Object {
     Func(Vec<String>, Vec<u8>),
     Frame(usize, Vec<u8>),
     None,
-    NFunc(usize, fn(Vec<Rc<RefCell<Object>>>) -> Rc<RefCell<Object>>),
+    NFunc(usize, fn(Vec<Rc<RefCell<Object>>>) -> Result<Rc<RefCell<Object>>, RuntimeError>),
 }
 
 impl Object {
-    fn equals(&self, other: Rc<RefCell<Object>>) -> bool {
+    pub fn equals(&self, other: Rc<RefCell<Object>>) -> bool {
         match self {
             Object::None => {
                 if let Object::None = *other.borrow() {
@@ -122,7 +122,7 @@ impl Object {
         }
     }
 
-    fn to_string(&self) -> String {
+    pub fn to_string(&self) -> String {
         match self {
             Object::Str(s) => s.clone(),
             Object::Bool(b) => b.to_string(),
@@ -194,8 +194,12 @@ fn bytes_to_f64(val: [u8; 8]) -> f64 {
     unsafe { transmute::<[u8; 8], f64>(val) }
 }
 
-fn bytes_to_usize(val: [u8; std::mem::size_of::<usize>()]) -> usize {
-    unsafe { transmute::<[u8; std::mem::size_of::<usize>()], usize>(val) }.to_le()
+pub fn bytes_to_u32(val: [u8; 4]) -> u32 {
+    unsafe { transmute::<[u8; 4], u32>(val) }.to_le()
+}
+
+pub fn bytes_to_u16(val: [u8; 2]) -> u16 {
+    unsafe { transmute::<[u8; 2], u16>(val) }.to_le()
 }
 
 fn pop_int(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<i64, RuntimeError> {
@@ -295,18 +299,20 @@ impl Scope {
     }
 }
 
-fn n_print(args: Vec<Rc<RefCell<Object>>>) -> Rc<RefCell<Object>> {
+fn n_print(args: Vec<Rc<RefCell<Object>>>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
     println!("{}", args[0].borrow().to_string());
-    Rc::new(RefCell::new(Object::None))
+    Ok(Rc::new(RefCell::new(Object::None)))
 }
 
-fn n_list_len(args: Vec<Rc<RefCell<Object>>>) -> Rc<RefCell<Object>> {
-    Rc::new(RefCell::new(Object::Int(match &*args[0].borrow() {
-        Object::List(v) => v.len(),
-        Object::Bendy(m) => m.len(),
-        Object::Str(s) => s.len(),
-        _ => panic!("not a list"),
-    } as i64)))
+fn n_list_len(args: Vec<Rc<RefCell<Object>>>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
+    Ok(Rc::new(RefCell::new(Object::Int(
+        match &*args[0].borrow() {
+            Object::List(v) => v.len(),
+            Object::Bendy(m) => m.len(),
+            Object::Str(s) => s.len(),
+            _ => return Err(RuntimeError::TypeError),
+        } as i64,
+    ))))
 }
 
 fn insert_builtin_funcs(scope: &mut Scope) {
@@ -340,10 +346,9 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
         ip += 1;
         match code {
             1 => {
-                let s = std::mem::size_of::<usize>();
-                let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
-                ip += s;
-                push!(Object::Str(constants[val].clone()));
+                let val = bytes_to_u16(codes[ip..ip + 2].try_into().expect(""));
+                ip += 2;
+                push!(Object::Str(constants[val as usize].clone()));
             }
             2 => {
                 let val = codes[ip] > 0;
@@ -361,48 +366,43 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
                 push!(Object::Int(val));
             }
             5 => {
-                let s = std::mem::size_of::<usize>();
-                let arglen = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
-                ip += s;
+                let arglen = bytes_to_u16(codes[ip..ip + 2].try_into().expect(""));
+                ip += 2;
                 let args: Vec<String> = (0..arglen)
                     .map(|_| {
-                        let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
-                        ip += s;
-                        constants[val].clone()
+                        let val = bytes_to_u16(codes[ip..ip + 2].try_into().expect(""));
+                        ip += 2;
+                        constants[val as usize].clone()
                     })
                     .collect();
-                let codelen = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
-                ip += s;
-                let codes: Vec<u8> = codes[ip..ip + codelen].to_vec();
-                ip += codelen;
+                let codelen = bytes_to_u32(codes[ip..ip + 4].try_into().expect(""));
+                ip += 4;
+                let codes: Vec<u8> = codes[ip..ip + codelen as usize].to_vec();
+                ip += codelen as usize;
                 push!(Object::Func(args, codes));
             }
             6 => {
-                let s = std::mem::size_of::<usize>();
-                let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
-                ip += s;
-                let name = constants[val].clone();
+                let val = bytes_to_u16(codes[ip..ip + 2].try_into().expect(""));
+                ip += 2;
+                let name = constants[val as usize].clone();
                 scope.put(name, stack.pop().unwrap());
             }
             7 => {
-                let s = std::mem::size_of::<usize>();
-                let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
-                ip += s;
-                let name = constants[val].clone();
+                let val = bytes_to_u16(codes[ip..ip + 2].try_into().expect(""));
+                ip += 2;
+                let name = constants[val as usize].clone();
                 stack.push(Rc::clone(&scope.get(name)?));
             }
             10 => {
-                let s = std::mem::size_of::<usize>();
-                let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
-                ip += s;
+                let val = bytes_to_u32(codes[ip..ip + 4].try_into().expect(""));
+                ip += 4;
                 if !pop_boolable(&mut stack)? {
-                    ip = val;
+                    ip = val as usize;
                 }
             }
             11 => {
-                let s = std::mem::size_of::<usize>();
-                let val = bytes_to_usize(codes[ip..ip + s].try_into().expect(""));
-                ip = val;
+                let val = bytes_to_u32(codes[ip..ip + 4].try_into().expect(""));
+                ip = val as usize;
             }
             12 => push!(Object::None),
             13 => push!(Object::Bendy(HashMap::new())),
@@ -574,7 +574,7 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
                         let val = stack.pop().unwrap();
                         args.push(val);
                     }
-                    stack.push(fp(args));
+                    stack.push(fp(args)?);
                 }
                 _ => return Err(RuntimeError::TypeError),
             },

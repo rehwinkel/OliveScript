@@ -6,34 +6,22 @@ use indexmap::IndexSet;
 use std::env;
 use std::fs;
 use std::fs::File;
+use std::io::Result as IoResult;
 use std::io::Write;
 use std::path::Path;
 
-fn write_to_file(
-    pathname: &String,
-    constants: &IndexSet<String>,
-    codes: &Vec<u8>,
-) -> Result<(), String> {
+fn write_to_file(pathname: &String, constants: &IndexSet<String>, codes: &Vec<u8>) -> IoResult<()> {
     let outpath = Path::new(pathname);
-    let mut outfile = File::create(&outpath).map_err(|err| format!("{}", err))?;
+    let mut outfile = File::create(&outpath)?;
 
-    outfile
-        .write_all(&Code::usize_to_bytes(constants.len()))
-        .map_err(|err| format!("{}", err))?;
+    outfile.write_all(&Code::u32_to_bytes(0xBAFADACE))?;
+    outfile.write_all(&Code::u16_to_bytes(constants.len() as u16))?;
     for constant in constants {
-        outfile
-            .write_all(&Code::usize_to_bytes(constant.len()))
-            .map_err(|err| format!("{}", err))?;
-        outfile
-            .write_all(constant.as_bytes())
-            .map_err(|err| format!("{}", err))?;
+        outfile.write_all(&Code::u16_to_bytes(constant.len() as u16))?;
+        outfile.write_all(constant.as_bytes())?;
     }
-    outfile
-        .write_all(&Code::usize_to_bytes(codes.len()))
-        .map_err(|err| format!("{}", err))?;
-    outfile
-        .write_all(&codes)
-        .map_err(|err| format!("{}", err))?;
+    outfile.write_all(&Code::u32_to_bytes(codes.len() as u32))?;
+    outfile.write_all(&codes)?;
     Ok(())
 }
 
@@ -51,7 +39,7 @@ fn main() -> Result<(), String> {
             &mut constants,
         );
 
-        write_to_file(&outpath, &constants, &codes)?;
+        write_to_file(&outpath, &constants, &codes).map_err(|err| format!("{}", err))?;
         Ok(())
     } else {
         Err(String::from("argument required"))

@@ -69,15 +69,15 @@ pub enum Code {
     LessEquals,
     GreaterThan,
     GreaterEquals,
-    JumpNot(usize),
-    Goto(usize),
-    Break(usize),
+    JumpNot(u32),
+    Goto(u32),
+    Break(u32),
     Pop,
 }
 
 #[derive(Clone)]
 pub struct NumberedCode {
-    pos: usize,
+    pos: u32,
     code: Code,
 }
 
@@ -88,8 +88,13 @@ impl Debug for NumberedCode {
 }
 
 impl Code {
-    pub fn usize_to_bytes(val: usize) -> Vec<u8> {
-        let bytes: [u8; std::mem::size_of::<usize>()] = unsafe { transmute(val.to_le()) };
+    pub fn u16_to_bytes(val: u16) -> Vec<u8> {
+        let bytes: [u8; 2] = unsafe { transmute(val.to_le()) };
+        bytes.to_vec()
+    }
+
+    pub fn u32_to_bytes(val: u32) -> Vec<u8> {
+        let bytes: [u8; 4] = unsafe { transmute(val.to_le()) };
         bytes.to_vec()
     }
 
@@ -107,37 +112,37 @@ impl Code {
         match self {
             Code::PushString(s) => {
                 let index = constants.insert_full(s.clone()).0;
-                [vec![1], Code::usize_to_bytes(index)].concat()
+                [vec![1], Code::u16_to_bytes(index as u16)].concat()
             }
             Code::PushBoolean(b) => vec![2, *b as u8],
             Code::PushFloat(f) => [vec![3], Code::f64_to_bytes(*f)].concat(),
             Code::PushInt(i) => [vec![4], Code::i64_to_bytes(*i)].concat(),
             Code::Store(name) => {
                 let index = constants.insert_full(name.clone()).0;
-                [vec![6], Code::usize_to_bytes(index)].concat()
+                [vec![6], Code::u16_to_bytes(index as u16)].concat()
             }
             Code::Load(name) => {
                 let index = constants.insert_full(name.clone()).0;
-                [vec![7], Code::usize_to_bytes(index)].concat()
+                [vec![7], Code::u16_to_bytes(index as u16)].concat()
             }
             Code::TStore(i) => {
                 let index = constants.insert_full(format!("<{}>", i)).0;
-                [vec![6], Code::usize_to_bytes(index)].concat()
+                [vec![6], Code::u16_to_bytes(index as u16)].concat()
             }
             Code::TLoad(i) => {
                 let index = constants.insert_full(format!("<{}>", i)).0;
-                [vec![7], Code::usize_to_bytes(index)].concat()
+                [vec![7], Code::u16_to_bytes(index as u16)].concat()
             }
-            Code::JumpNot(p) => [vec![10], Code::usize_to_bytes(*p)].concat(),
-            Code::Goto(p) | Code::Break(p) => [vec![11], Code::usize_to_bytes(*p)].concat(),
+            Code::JumpNot(p) => [vec![10], Code::u32_to_bytes(*p)].concat(),
+            Code::Goto(p) | Code::Break(p) => [vec![11], Code::u32_to_bytes(*p)].concat(),
             Code::NewFun(args, codes) => {
-                let arglen = Code::usize_to_bytes(args.len());
+                let arglen = Code::u16_to_bytes(args.len() as u16);
                 let argindices: Vec<u8> = args
                     .iter()
-                    .map(|arg| Code::usize_to_bytes(constants.insert_full(arg.clone()).0))
+                    .map(|arg| Code::u16_to_bytes(constants.insert_full(arg.clone()).0 as u16))
                     .flat_map(|bytes| bytes)
                     .collect();
-                let codeslen = Code::usize_to_bytes(codes.len());
+                let codeslen = Code::u32_to_bytes(codes.len() as u32);
                 [vec![5], arglen, argindices, codeslen, codes.clone()].concat()
             }
             Code::PushNone => vec![12],
@@ -175,7 +180,7 @@ impl Code {
 
     fn get_code(&self, counter: &mut AtomicUsize) -> NumberedCode {
         NumberedCode {
-            pos: counter.fetch_add(self.len(), Ordering::SeqCst),
+            pos: counter.fetch_add(self.len(), Ordering::SeqCst) as u32,
             code: self.clone(),
         }
     }
@@ -185,19 +190,18 @@ impl Code {
     }
 
     fn len(&self) -> usize {
-        let intsize = std::mem::size_of::<usize>();
         match self {
-            Code::PushString(_) => 1 + intsize,
+            Code::PushString(_) => 3,
             Code::PushBoolean(_) => 2,
             Code::PushFloat(_) => 9,
             Code::PushInt(_) => 9,
-            Code::NewFun(args, codes) => 1 + intsize * (args.len() + 2) + codes.len(),
-            Code::Store(_) => 1 + intsize,
-            Code::Load(_) => 1 + intsize,
-            Code::TStore(_) => 1 + intsize,
-            Code::TLoad(_) => 1 + intsize,
-            Code::JumpNot(_) => 1 + intsize,
-            Code::Goto(_) | Code::Break(_) => 1 + intsize,
+            Code::NewFun(args, codes) => 1 + 2 * (args.len() + 1) + 4 + codes.len(),
+            Code::Store(_) => 3,
+            Code::Load(_) => 3,
+            Code::TStore(_) => 3,
+            Code::TLoad(_) => 3,
+            Code::JumpNot(_) => 5,
+            Code::Goto(_) | Code::Break(_) => 5,
             Code::PushNone => 1,
             Code::NewBendy => 1,
             Code::NewList => 1,
@@ -382,8 +386,8 @@ impl Statement {
         &self,
         codes: &mut Vec<NumberedCode>,
         counter: &mut AtomicUsize,
-        while_start_index: usize,
-        while_end_index: usize,
+        while_start_index: u32,
+        while_end_index: u32,
         constants: &mut IndexSet<String>,
     ) -> Result<(), CodeGenError> {
         match self {
@@ -424,7 +428,7 @@ impl Statement {
                     Code::Goto(0).push_code(codes, counter);
                     codes[jumpindex] = NumberedCode {
                         pos: codes[jumpindex].pos,
-                        code: Code::JumpNot(codes.len()),
+                        code: Code::JumpNot(codes.len() as u32),
                     };
                     block.generate(
                         codes,
@@ -435,25 +439,25 @@ impl Statement {
                     )?;
                     codes[gotoindex] = NumberedCode {
                         pos: codes[gotoindex].pos,
-                        code: Code::Goto(codes.len()),
+                        code: Code::Goto(codes.len() as u32),
                     };
                 } else {
                     codes[jumpindex] = NumberedCode {
                         pos: codes[jumpindex].pos,
-                        code: Code::JumpNot(codes.len()),
+                        code: Code::JumpNot(codes.len() as u32),
                     };
                 }
             }
             Statement::While(cond, block) => {
-                let repeat_index = codes.len();
+                let repeat_index = codes.len() as u32;
                 cond.generate(codes, counter, false, false, constants)?;
-                let end_index = codes.len();
+                let end_index = codes.len() as u32;
                 Code::JumpNot(0).push_code(codes, counter);
                 block.generate(codes, counter, repeat_index, end_index, constants)?;
                 Code::Goto(repeat_index).push_code(codes, counter);
-                codes[end_index] = NumberedCode {
-                    pos: codes[end_index].pos,
-                    code: Code::JumpNot(codes.len()),
+                codes[end_index as usize] = NumberedCode {
+                    pos: codes[end_index as usize].pos,
+                    code: Code::JumpNot(codes.len() as u32),
                 };
             }
             Statement::Continue => {
@@ -478,10 +482,10 @@ pub fn generate(
     Code::Return.push_code(&mut codes, &mut counter);
     for (i, code) in codes.clone().into_iter().enumerate() {
         match code.code {
-            Code::JumpNot(index) => codes[i].code = Code::JumpNot(codes[index].pos),
-            Code::Goto(index) => codes[i].code = Code::Goto(codes[index].pos),
+            Code::JumpNot(index) => codes[i].code = Code::JumpNot(codes[index as usize].pos as u32),
+            Code::Goto(index) => codes[i].code = Code::Goto(codes[index as usize].pos as u32),
             Code::Break(index) => {
-                if let Code::JumpNot(j) = codes[index].code {
+                if let Code::JumpNot(j) = codes[index as usize].code {
                     codes[i].code = Code::Goto(j)
                 }
             }
