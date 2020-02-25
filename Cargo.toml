@@ -12,5 +12,9 @@ path = "src/main_interpreter.rs"
 name = "olvc"
 path = "src/main_compiler.rs"
 
+[lib]
+name = "olv"
+path = "src/lib.rs"
+
 [dependencies]
 indexmap = "1.3.2"
