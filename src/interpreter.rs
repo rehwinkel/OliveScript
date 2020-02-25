@@ -300,6 +300,26 @@ fn n_print(args: Vec<Rc<RefCell<Object>>>) -> Rc<RefCell<Object>> {
     Rc::new(RefCell::new(Object::None))
 }
 
+fn n_list_len(args: Vec<Rc<RefCell<Object>>>) -> Rc<RefCell<Object>> {
+    Rc::new(RefCell::new(Object::Int(match &*args[0].borrow() {
+        Object::List(v) => v.len(),
+        Object::Bendy(m) => m.len(),
+        Object::Str(s) => s.len(),
+        _ => panic!("not a list"),
+    } as i64)))
+}
+
+fn insert_builtin_funcs(scope: &mut Scope) {
+    scope.put(
+        "print".to_string(),
+        Rc::new(RefCell::new(Object::NFunc(1, n_print))),
+    );
+    scope.put(
+        "len".to_string(),
+        Rc::new(RefCell::new(Object::NFunc(1, n_list_len))),
+    );
+}
+
 pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError> {
     let mut stack: Vec<Rc<RefCell<Object>>> = Vec::new();
     let mut scope = Scope::new();
@@ -310,11 +330,8 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
         };
     }
 
+    insert_builtin_funcs(&mut scope);
     push!(Object::Func(Vec::new(), in_codes));
-    scope.put(
-        String::from("print"),
-        Rc::new(RefCell::new(Object::NFunc(1, n_print))),
-    );
     let mut codes = vec![33_u8];
 
     let mut ip: usize = 0;
@@ -636,6 +653,5 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
             _ => panic!("unexpected code: {:?}", code),
         }
     }
-    println!("module: {:?}", stack.pop().unwrap().borrow());
     Ok(())
 }
