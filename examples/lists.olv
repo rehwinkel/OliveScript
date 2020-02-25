@@ -7,6 +7,7 @@ with_objs = new [1, 2, 3];
 
 # get length with inbuilt function
 print(len(empty));
+print(len(with_objs));
 
 # access
 print(with_objs[0]);
