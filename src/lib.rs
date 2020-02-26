@@ -1,4 +1,4 @@
 pub mod interpreter;
 
-pub use crate::interpreter::Object;
-pub use crate::interpreter::RuntimeError;
+pub use crate::interpreter::data::Object;
+pub use crate::interpreter::data::RuntimeError;

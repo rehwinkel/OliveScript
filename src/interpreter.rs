@@ -1,196 +1,269 @@
 use libloading::{Library, Symbol};
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::convert::TryInto;
 use std::env;
-use std::error::Error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::mem::transmute;
+
+pub mod data {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::error::Error;
+    use std::fmt::{Display, Formatter, Result as FmtResult};
+    use std::rc::Rc;
+
+    pub type NativeFunc =
+        fn(Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>, RuntimeError>;
+
+    #[derive(Debug)]
+    pub enum Object {
+        Str(String),
+        Bool(bool),
+        Int(i64),
+        Float(f64),
+        Bendy(HashMap<String, Rc<RefCell<Object>>>),
+        List(Vec<Rc<RefCell<Object>>>),
+        Func(Vec<String>, Vec<u8>),
+        Frame(usize, Vec<u8>),
+        None,
+        NFunc(usize, NativeFunc),
+    }
+
+    impl Object {
+        pub fn equals(&self, other: Rc<RefCell<Object>>) -> bool {
+            match self {
+                Object::None => {
+                    if let Object::None = *other.borrow() {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                Object::Bool(b) => {
+                    if let Object::Bool(b2) = *other.borrow() {
+                        *b == b2
+                    } else {
+                        false
+                    }
+                }
+                Object::Str(s) => {
+                    if let Object::Str(s2) = &*other.borrow() {
+                        *s == *s2
+                    } else {
+                        false
+                    }
+                }
+                Object::Int(i) => match *other.borrow() {
+                    Object::Int(j) => *i == j,
+                    Object::Float(j) => *i as f64 == j,
+                    _ => false,
+                },
+                Object::Float(i) => match *other.borrow() {
+                    Object::Int(j) => *i == j as f64,
+                    Object::Float(j) => *i == j,
+                    _ => false,
+                },
+                Object::List(l) => {
+                    if let Object::List(l2) = &*other.borrow() {
+                        if l.len() == l2.len() {
+                            for i in 0..l.len() {
+                                if !l[i].borrow().equals(Rc::clone(&l2[i])) {
+                                    return false;
+                                }
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+                Object::Bendy(l) => {
+                    if let Object::Bendy(l2) = &*other.borrow() {
+                        if l.len() == l2.len() {
+                            let lk: Vec<&String> = l.keys().collect();
+                            let l2k: Vec<&String> = l2.keys().collect();
+                            for i in 0..l.len() {
+                                if lk[i] != l2k[i]
+                                    || !l[lk[i]].borrow().equals(Rc::clone(&l2[l2k[i]]))
+                                {
+                                    return false;
+                                }
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+                Object::Func(args, codes) => {
+                    if let Object::Func(args2, codes2) = &*other.borrow() {
+                        if args.len() == args.len() && codes.len() == codes2.len() {
+                            for i in 0..args.len() {
+                                if args[i] != args2[i] {
+                                    return false;
+                                }
+                            }
+                            for i in 0..codes.len() {
+                                if codes[i] != codes2[i] {
+                                    return false;
+                                }
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+
+                Object::NFunc(arglen, fp) => {
+                    if let Object::NFunc(arglen2, fp2) = &*other.borrow() {
+                        arglen == arglen2 && fp == fp2
+                    } else {
+                        false
+                    }
+                }
+                Object::Frame(_, _) => panic!("forbidden type"),
+            }
+        }
+
+        pub fn to_string(&self) -> String {
+            match self {
+                Object::Str(s) => s.clone(),
+                Object::Bool(b) => b.to_string(),
+                Object::Int(i) => i.to_string(),
+                Object::Float(f) => format!("{:.5}", f),
+                Object::None => String::from("none"),
+                Object::List(v) => {
+                    let mut string = String::from("[");
+                    if v.len() > 0 {
+                        string += format!("{}", (*v[0].borrow()).to_string()).as_str();
+                        for value in &v[1..] {
+                            string += format!(", {}", (*value.borrow()).to_string()).as_str();
+                        }
+                    }
+                    string + "]"
+                }
+                Object::Bendy(m) => {
+                    let mut string = String::from("{");
+                    if m.len() > 0 {
+                        let keys: Vec<&String> = m.keys().collect();
+                        string +=
+                            format!("{}: {}", keys[0], (*m[keys[0]].borrow()).to_string()).as_str();
+                        for key in &keys[1..] {
+                            let value = &m[*key];
+                            string +=
+                                format!(", {}: {}", key, (*value.borrow()).to_string()).as_str();
+                        }
+                    }
+                    string + "}"
+                }
+                Object::Func(args, _) => {
+                    let mut string = String::from("func(");
+                    if args.len() > 0 {
+                        string += args[0].as_str();
+                        for value in &args[1..] {
+                            string += ", ";
+                            string += value.as_str();
+                        }
+                    }
+                    string + ")"
+                }
+                Object::NFunc(arglen, _) => format!("nfunc({})", arglen),
+                Object::Frame(_, _) => panic!("forbidden type"),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    pub enum RuntimeError {
+        TypeError,
+        KeyError(String),
+        ImportError(String),
+    }
+
+    impl Error for RuntimeError {}
+
+    impl Display for RuntimeError {
+        fn fmt(&self, f: &mut Formatter) -> FmtResult {
+            match self {
+                RuntimeError::TypeError => write!(f, "type error: {:?}", self),
+                RuntimeError::KeyError(key) => write!(f, "key error: {}", key),
+                RuntimeError::ImportError(err) => write!(f, "import error: {}", err),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct Scope {
+        pub parent: Option<Box<Scope>>,
+        locvars: HashMap<String, Rc<RefCell<Object>>>,
+    }
+
+    impl Scope {
+        pub fn new() -> Self {
+            Scope {
+                parent: None,
+                locvars: HashMap::new(),
+            }
+        }
+        pub fn from(parent: Scope) -> Self {
+            Scope {
+                parent: Some(Box::new(parent)),
+                locvars: HashMap::new(),
+            }
+        }
+
+        pub fn put(&mut self, name: String, val: Rc<RefCell<Object>>) {
+            if self.has(name.clone()) {
+                self.locvars.insert(name, val); // write in this
+            } else {
+                if let Some(ref mut parent_scope) = &mut self.parent {
+                    if parent_scope.has(name.clone()) {
+                        parent_scope.put(name, val); // write in parent
+                    } else {
+                        self.locvars.insert(name, val); // write in this
+                    }
+                } else {
+                    self.locvars.insert(name, val); // write in this
+                }
+            }
+        }
+
+        pub fn get(&self, name: String) -> Result<Rc<RefCell<Object>>, RuntimeError> {
+            if let Some(val) = self.locvars.get(&name) {
+                Ok(Rc::clone(val))
+            } else {
+                if let Some(parent_scope) = &self.parent {
+                    Ok(parent_scope.get(name)?)
+                } else {
+                    Err(RuntimeError::KeyError(name))
+                }
+            }
+        }
+
+        fn has(&self, name: String) -> bool {
+            let keys: Vec<&String> = self.locvars.keys().collect();
+            if keys.contains(&&name) {
+                true
+            } else {
+                if let Some(parent_scope) = &self.parent {
+                    parent_scope.has(name)
+                } else {
+                    false
+                }
+            }
+        }
+    }
+}
+
+use data::{NativeFunc, Object, RuntimeError, Scope};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
-
-type NativeFunc = fn(Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>, RuntimeError>;
-
-#[derive(Debug)]
-pub enum Object {
-    Str(String),
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    Bendy(HashMap<String, Rc<RefCell<Object>>>),
-    List(Vec<Rc<RefCell<Object>>>),
-    Func(Vec<String>, Vec<u8>),
-    Frame(usize, Vec<u8>),
-    None,
-    NFunc(usize, NativeFunc),
-}
-
-impl Object {
-    pub fn equals(&self, other: Rc<RefCell<Object>>) -> bool {
-        match self {
-            Object::None => {
-                if let Object::None = *other.borrow() {
-                    true
-                } else {
-                    false
-                }
-            }
-            Object::Bool(b) => {
-                if let Object::Bool(b2) = *other.borrow() {
-                    *b == b2
-                } else {
-                    false
-                }
-            }
-            Object::Str(s) => {
-                if let Object::Str(s2) = &*other.borrow() {
-                    *s == *s2
-                } else {
-                    false
-                }
-            }
-            Object::Int(i) => match *other.borrow() {
-                Object::Int(j) => *i == j,
-                Object::Float(j) => *i as f64 == j,
-                _ => false,
-            },
-            Object::Float(i) => match *other.borrow() {
-                Object::Int(j) => *i == j as f64,
-                Object::Float(j) => *i == j,
-                _ => false,
-            },
-            Object::List(l) => {
-                if let Object::List(l2) = &*other.borrow() {
-                    if l.len() == l2.len() {
-                        for i in 0..l.len() {
-                            if !l[i].borrow().equals(Rc::clone(&l2[i])) {
-                                return false;
-                            }
-                        }
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
-            Object::Bendy(l) => {
-                if let Object::Bendy(l2) = &*other.borrow() {
-                    if l.len() == l2.len() {
-                        let lk: Vec<&String> = l.keys().collect();
-                        let l2k: Vec<&String> = l2.keys().collect();
-                        for i in 0..l.len() {
-                            if lk[i] != l2k[i] || !l[lk[i]].borrow().equals(Rc::clone(&l2[l2k[i]]))
-                            {
-                                return false;
-                            }
-                        }
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
-            Object::Func(args, codes) => {
-                if let Object::Func(args2, codes2) = &*other.borrow() {
-                    if args.len() == args.len() && codes.len() == codes2.len() {
-                        for i in 0..args.len() {
-                            if args[i] != args2[i] {
-                                return false;
-                            }
-                        }
-                        for i in 0..codes.len() {
-                            if codes[i] != codes2[i] {
-                                return false;
-                            }
-                        }
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
-
-            Object::NFunc(arglen, fp) => {
-                if let Object::NFunc(arglen2, fp2) = &*other.borrow() {
-                    arglen == arglen2 && fp == fp2
-                } else {
-                    false
-                }
-            }
-            Object::Frame(_, _) => panic!("forbidden type"),
-        }
-    }
-
-    pub fn to_string(&self) -> String {
-        match self {
-            Object::Str(s) => s.clone(),
-            Object::Bool(b) => b.to_string(),
-            Object::Int(i) => i.to_string(),
-            Object::Float(f) => format!("{:.5}", f),
-            Object::None => String::from("none"),
-            Object::List(v) => {
-                let mut string = String::from("[");
-                if v.len() > 0 {
-                    string += format!("{}", (*v[0].borrow()).to_string()).as_str();
-                    for value in &v[1..] {
-                        string += format!(", {}", (*value.borrow()).to_string()).as_str();
-                    }
-                }
-                string + "]"
-            }
-            Object::Bendy(m) => {
-                let mut string = String::from("{");
-                if m.len() > 0 {
-                    let keys: Vec<&String> = m.keys().collect();
-                    string +=
-                        format!("{}: {}", keys[0], (*m[keys[0]].borrow()).to_string()).as_str();
-                    for key in &keys[1..] {
-                        let value = &m[*key];
-                        string += format!(", {}: {}", key, (*value.borrow()).to_string()).as_str();
-                    }
-                }
-                string + "}"
-            }
-            Object::Func(args, _) => {
-                let mut string = String::from("func(");
-                if args.len() > 0 {
-                    string += args[0].as_str();
-                    for value in &args[1..] {
-                        string += ", ";
-                        string += value.as_str();
-                    }
-                }
-                string + ")"
-            }
-            Object::NFunc(arglen, _) => format!("nfunc({})", arglen),
-            Object::Frame(_, _) => panic!("forbidden type"),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum RuntimeError {
-    TypeError,
-    KeyError(String),
-    ImportError(String),
-}
-
-impl Error for RuntimeError {}
-
-impl Display for RuntimeError {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match self {
-            RuntimeError::TypeError => write!(f, "type error: {:?}", self),
-            RuntimeError::KeyError(key) => write!(f, "key error: {}", key),
-            RuntimeError::ImportError(err) => write!(f, "import error: {}", err),
-        }
-    }
-}
 
 fn bytes_to_i64(val: [u8; 8]) -> i64 {
     unsafe { transmute::<[u8; 8], i64>(val) }.to_le()
@@ -241,68 +314,6 @@ fn pop_boolable(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<bool, RuntimeErr
         Object::NFunc(_, _) => true,
         Object::Frame(_, _) => panic!("forbidden type"),
     })
-}
-
-#[derive(Debug)]
-struct Scope {
-    parent: Option<Box<Scope>>,
-    locvars: HashMap<String, Rc<RefCell<Object>>>,
-}
-
-impl Scope {
-    fn new() -> Self {
-        Scope {
-            parent: None,
-            locvars: HashMap::new(),
-        }
-    }
-    fn from(parent: Scope) -> Self {
-        Scope {
-            parent: Some(Box::new(parent)),
-            locvars: HashMap::new(),
-        }
-    }
-
-    fn put(&mut self, name: String, val: Rc<RefCell<Object>>) {
-        if self.has(name.clone()) {
-            self.locvars.insert(name, val); // write in this
-        } else {
-            if let Some(ref mut parent_scope) = &mut self.parent {
-                if parent_scope.has(name.clone()) {
-                    parent_scope.put(name, val); // write in parent
-                } else {
-                    self.locvars.insert(name, val); // write in this
-                }
-            } else {
-                self.locvars.insert(name, val); // write in this
-            }
-        }
-    }
-
-    fn get(&self, name: String) -> Result<Rc<RefCell<Object>>, RuntimeError> {
-        if let Some(val) = self.locvars.get(&name) {
-            Ok(Rc::clone(val))
-        } else {
-            if let Some(parent_scope) = &self.parent {
-                Ok(parent_scope.get(name)?)
-            } else {
-                Err(RuntimeError::KeyError(name))
-            }
-        }
-    }
-
-    fn has(&self, name: String) -> bool {
-        let keys: Vec<&String> = self.locvars.keys().collect();
-        if keys.contains(&&name) {
-            true
-        } else {
-            if let Some(parent_scope) = &self.parent {
-                parent_scope.has(name)
-            } else {
-                false
-            }
-        }
-    }
 }
 
 fn n_print(args: Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
