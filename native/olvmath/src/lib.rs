@@ -1,4 +1,3 @@
-extern crate olv;
 use olv::{Object, RuntimeError};
 use std::cell::RefCell;
 use std::rc::Rc;

@@ -1,0 +1,13 @@
+[package]
+name = "olvmath"
+version = "0.1.0"
+authors = ["Ian Rehwinkel <ian.rehwinkel@tutanota.com>"]
+edition = "2018"
+
+[dependencies]
+olive_script = { path = "../.." }
+
+[lib]
+name = "math"
+crate-type = ["dylib"]
+path = "src/lib.rs"
