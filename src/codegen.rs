@@ -1,6 +1,5 @@
 use crate::parser::lexer::Token;
 use crate::parser::parser::{Expression, Operator, Statement};
-use indexmap::IndexSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::mem::transmute;
@@ -56,8 +55,6 @@ pub enum Code {
     Concat,
     Store(String),
     Load(String),
-    TStore(usize),
-    TLoad(usize),
     Put,
     Get,
     Call,
@@ -108,38 +105,29 @@ impl Code {
         bytes.to_vec()
     }
 
-    fn to_bytes(&self, constants: &mut IndexSet<String>) -> Vec<u8> {
+    fn string_to_bytes(val: String) -> Vec<u8> {
+        [
+            Code::u16_to_bytes(val.capacity() as u16),
+            val.as_bytes().to_vec(),
+        ]
+        .concat()
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
         match self {
-            Code::PushString(s) => {
-                let index = constants.insert_full(s.clone()).0;
-                [vec![1], Code::u16_to_bytes(index as u16)].concat()
-            }
+            Code::PushString(s) => [vec![1], Code::string_to_bytes(s.clone())].concat(),
             Code::PushBoolean(b) => vec![2, *b as u8],
             Code::PushFloat(f) => [vec![3], Code::f64_to_bytes(*f)].concat(),
             Code::PushInt(i) => [vec![4], Code::i64_to_bytes(*i)].concat(),
-            Code::Store(name) => {
-                let index = constants.insert_full(name.clone()).0;
-                [vec![6], Code::u16_to_bytes(index as u16)].concat()
-            }
-            Code::Load(name) => {
-                let index = constants.insert_full(name.clone()).0;
-                [vec![7], Code::u16_to_bytes(index as u16)].concat()
-            }
-            Code::TStore(i) => {
-                let index = constants.insert_full(format!("<{}>", i)).0;
-                [vec![6], Code::u16_to_bytes(index as u16)].concat()
-            }
-            Code::TLoad(i) => {
-                let index = constants.insert_full(format!("<{}>", i)).0;
-                [vec![7], Code::u16_to_bytes(index as u16)].concat()
-            }
+            Code::Store(name) => [vec![6], Code::string_to_bytes(name.clone())].concat(),
+            Code::Load(name) => [vec![7], Code::string_to_bytes(name.clone())].concat(),
             Code::JumpNot(p) => [vec![10], Code::u32_to_bytes(*p)].concat(),
             Code::Goto(p) | Code::Break(p) => [vec![11], Code::u32_to_bytes(*p)].concat(),
             Code::NewFun(args, codes) => {
                 let arglen = Code::u16_to_bytes(args.len() as u16);
                 let argindices: Vec<u8> = args
                     .iter()
-                    .map(|arg| Code::u16_to_bytes(constants.insert_full(arg.clone()).0 as u16))
+                    .map(|arg| Code::string_to_bytes(arg.clone()))
                     .flat_map(|bytes| bytes)
                     .collect();
                 let codeslen = Code::u32_to_bytes(codes.len() as u32);
@@ -188,18 +176,22 @@ impl Code {
     fn push_code(&self, codes: &mut Vec<NumberedCode>, counter: &mut AtomicUsize) {
         codes.push(self.get_code(counter))
     }
+    fn string_len(s: &String) -> usize {
+        s.capacity() + 2
+    }
 
     fn len(&self) -> usize {
         match self {
-            Code::PushString(_) => 3,
+            Code::PushString(s) => 1 + Code::string_len(s),
             Code::PushBoolean(_) => 2,
             Code::PushFloat(_) => 9,
             Code::PushInt(_) => 9,
-            Code::NewFun(args, codes) => 1 + 2 * (args.len() + 1) + 4 + codes.len(),
-            Code::Store(_) => 3,
-            Code::Load(_) => 3,
-            Code::TStore(_) => 3,
-            Code::TLoad(_) => 3,
+            Code::NewFun(args, codes) => {
+                let strargs: usize = args.iter().map(|arg| Code::string_len(arg)).sum();
+                1 + 2 + strargs + 4 + codes.len()
+            }
+            Code::Store(s) => 1 + Code::string_len(s),
+            Code::Load(s) => 1 + Code::string_len(s),
             Code::JumpNot(_) => 5,
             Code::Goto(_) | Code::Break(_) => 5,
             Code::PushNone => 1,
@@ -245,7 +237,6 @@ impl Expression {
         counter: &mut AtomicUsize,
         is_load: bool,
         is_set: bool,
-        constants: &mut IndexSet<String>,
     ) -> Result<(), CodeGenError> {
         match self {
             Expression::Value(val) => match val {
@@ -271,7 +262,7 @@ impl Expression {
                 _ => return Err(CodeGenError::InvalidValue),
             },
             Expression::Unary(expr, op) => {
-                expr.generate(codes, counter, false, false, constants)?;
+                expr.generate(codes, counter, false, false)?;
                 match op {
                     Operator::Neg => Code::Neg,
                     Operator::BoolNot => Code::BoolNot,
@@ -302,8 +293,8 @@ impl Expression {
                     Operator::GreaterThan => Code::GreaterThan,
                     Operator::GreaterEquals => Code::GreaterEquals,
                     Operator::Get => {
-                        rhs.generate(codes, counter, true, false, constants)?;
-                        lhs.generate(codes, counter, false, false, constants)?;
+                        rhs.generate(codes, counter, true, false)?;
+                        lhs.generate(codes, counter, false, false)?;
                         if is_set {
                             Code::Put.push_code(codes, counter);
                         } else {
@@ -312,8 +303,8 @@ impl Expression {
                         return Ok(());
                     }
                     Operator::ParGet => {
-                        rhs.generate(codes, counter, false, false, constants)?;
-                        lhs.generate(codes, counter, false, false, constants)?;
+                        rhs.generate(codes, counter, false, false)?;
+                        lhs.generate(codes, counter, false, false)?;
                         if is_set {
                             Code::Put.push_code(codes, counter);
                         } else {
@@ -322,58 +313,54 @@ impl Expression {
                         return Ok(());
                     }
                     Operator::Assign => {
-                        rhs.generate(codes, counter, false, false, constants)?;
-                        lhs.generate(codes, counter, false, true, constants)?;
+                        rhs.generate(codes, counter, false, false)?;
+                        lhs.generate(codes, counter, false, true)?;
                         return Ok(());
                     }
                     _ => return Err(CodeGenError::InvalidValue),
                 };
-                rhs.generate(codes, counter, false, false, constants)?;
-                lhs.generate(codes, counter, false, false, constants)?;
+                rhs.generate(codes, counter, false, false)?;
+                lhs.generate(codes, counter, false, false)?;
                 code.push_code(codes, counter);
             }
             Expression::Call(func, args) => {
                 for arg in args.iter().rev() {
-                    arg.generate(codes, counter, false, false, constants)?;
+                    arg.generate(codes, counter, false, false)?;
                 }
-                func.generate(codes, counter, false, false, constants)?;
+                func.generate(codes, counter, false, false)?;
                 Code::Call.push_code(codes, counter);
             }
             Expression::NewList(args) => {
                 let cnt = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
                 Code::NewList.push_code(codes, counter);
                 if !args.is_empty() {
-                    Code::TStore(cnt).push_code(codes, counter);
+                    Code::Store(format!("<{}>", cnt)).push_code(codes, counter);
                     for (i, arg) in args.iter().enumerate() {
-                        arg.generate(codes, counter, false, false, constants)?;
+                        arg.generate(codes, counter, false, false)?;
                         Code::PushInt(i as i64).push_code(codes, counter);
-                        Code::TLoad(cnt).push_code(codes, counter);
+                        Code::Load(format!("<{}>", cnt)).push_code(codes, counter);
                         Code::Put.push_code(codes, counter);
                     }
-                    Code::TLoad(cnt).push_code(codes, counter);
+                    Code::Load(format!("<{}>", cnt)).push_code(codes, counter);
                 }
             }
             Expression::NewBendy(args) => {
                 let cnt = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
                 Code::NewBendy.push_code(codes, counter);
                 if !args.is_empty() {
-                    Code::TStore(cnt).push_code(codes, counter);
+                    Code::Store(format!("<{}>", cnt)).push_code(codes, counter);
                     for pair in args {
-                        pair.value
-                            .generate(codes, counter, false, false, constants)?;
+                        pair.value.generate(codes, counter, false, false)?;
                         Code::PushString(pair.identifier.clone()).push_code(codes, counter);
-                        Code::TLoad(cnt).push_code(codes, counter);
+                        Code::Load(format!("<{}>", cnt)).push_code(codes, counter);
                         Code::Put.push_code(codes, counter);
                     }
-                    Code::TLoad(cnt).push_code(codes, counter);
+                    Code::Load(format!("<{}>", cnt)).push_code(codes, counter);
                 }
             }
             Expression::NewFunc(args, block) => {
-                Code::NewFun(
-                    args.clone(),
-                    to_bytes(generate(*block.clone(), constants)?, constants),
-                )
-                .push_code(codes, counter);
+                Code::NewFun(args.clone(), to_bytes(generate(*block.clone())?))
+                    .push_code(codes, counter);
             }
             _ => panic!(),
         }
@@ -388,41 +375,28 @@ impl Statement {
         counter: &mut AtomicUsize,
         while_start_index: u32,
         while_end_index: u32,
-        constants: &mut IndexSet<String>,
     ) -> Result<(), CodeGenError> {
         match self {
             Statement::Block(sts) => {
                 for st in sts {
-                    st.generate(
-                        codes,
-                        counter,
-                        while_start_index,
-                        while_end_index,
-                        constants,
-                    )?;
+                    st.generate(codes, counter, while_start_index, while_end_index)?;
                 }
             }
             Statement::Return(expr) => {
-                expr.generate(codes, counter, false, false, constants)?;
+                expr.generate(codes, counter, false, false)?;
                 Code::Return.push_code(codes, counter)
             }
             Statement::Expression(expr) => {
-                expr.generate(codes, counter, false, false, constants)?;
+                expr.generate(codes, counter, false, false)?;
                 if let Expression::Call(_, _) = &**expr {
                     Code::Pop.push_code(codes, counter);
                 }
             }
             Statement::If(cond, ifblock, elseblock) => {
-                cond.generate(codes, counter, false, false, constants)?;
+                cond.generate(codes, counter, false, false)?;
                 let jumpindex = codes.len();
                 Code::JumpNot(0).push_code(codes, counter);
-                ifblock.generate(
-                    codes,
-                    counter,
-                    while_start_index,
-                    while_end_index,
-                    constants,
-                )?;
+                ifblock.generate(codes, counter, while_start_index, while_end_index)?;
                 if let Some(block) = elseblock {
                     let gotoindex = codes.len();
                     Code::Goto(0).push_code(codes, counter);
@@ -430,13 +404,7 @@ impl Statement {
                         pos: codes[jumpindex].pos,
                         code: Code::JumpNot(codes.len() as u32),
                     };
-                    block.generate(
-                        codes,
-                        counter,
-                        while_start_index,
-                        while_end_index,
-                        constants,
-                    )?;
+                    block.generate(codes, counter, while_start_index, while_end_index)?;
                     codes[gotoindex] = NumberedCode {
                         pos: codes[gotoindex].pos,
                         code: Code::Goto(codes.len() as u32),
@@ -450,10 +418,10 @@ impl Statement {
             }
             Statement::While(cond, block) => {
                 let repeat_index = codes.len() as u32;
-                cond.generate(codes, counter, false, false, constants)?;
+                cond.generate(codes, counter, false, false)?;
                 let end_index = codes.len() as u32;
                 Code::JumpNot(0).push_code(codes, counter);
-                block.generate(codes, counter, repeat_index, end_index, constants)?;
+                block.generate(codes, counter, repeat_index, end_index)?;
                 Code::Goto(repeat_index).push_code(codes, counter);
                 codes[end_index as usize] = NumberedCode {
                     pos: codes[end_index as usize].pos,
@@ -471,13 +439,10 @@ impl Statement {
     }
 }
 
-pub fn generate(
-    block: Statement,
-    constants: &mut IndexSet<String>,
-) -> Result<Vec<NumberedCode>, CodeGenError> {
+pub fn generate(block: Statement) -> Result<Vec<NumberedCode>, CodeGenError> {
     let mut codes = Vec::new();
     let mut counter = AtomicUsize::new(0);
-    block.generate(&mut codes, &mut counter, 0, 0, constants)?;
+    block.generate(&mut codes, &mut counter, 0, 0)?;
     Code::PushNone.push_code(&mut codes, &mut counter);
     Code::Return.push_code(&mut codes, &mut counter);
     for (i, code) in codes.clone().into_iter().enumerate() {
@@ -495,10 +460,10 @@ pub fn generate(
     Ok(codes)
 }
 
-pub fn to_bytes(codes: Vec<NumberedCode>, constants: &mut IndexSet<String>) -> Vec<u8> {
+pub fn to_bytes(codes: Vec<NumberedCode>) -> Vec<u8> {
     codes
         .iter()
-        .map(|code| code.code.to_bytes(constants))
+        .map(|code| code.code.to_bytes())
         .flat_map(|bytes| bytes)
         .collect()
 }

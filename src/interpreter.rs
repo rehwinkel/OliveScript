@@ -1,9 +1,19 @@
-use libloading::{Library, Symbol};
+use data::{NativeFunc, Object, RuntimeError, Scope};
+use libloading::{RcLibrary, RcSymbol};
+use serde_json;
+use serde_json::Value;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::env;
+use std::ffi::CString;
+use std::fs;
 use std::mem::transmute;
+use std::path::PathBuf;
+use std::rc::Rc;
 
 pub mod data {
+    use libloading::RcSymbol;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::error::Error;
@@ -24,7 +34,8 @@ pub mod data {
         Func(Vec<String>, Vec<u8>),
         Frame(usize, Vec<u8>),
         None,
-        NFunc(usize, NativeFunc),
+        BuiltinFunc(usize, NativeFunc),
+        NativeFunc(usize, RcSymbol<NativeFunc>),
     }
 
     impl Object {
@@ -119,9 +130,17 @@ pub mod data {
                     }
                 }
 
-                Object::NFunc(arglen, fp) => {
-                    if let Object::NFunc(arglen2, fp2) = &*other.borrow() {
+                Object::BuiltinFunc(arglen, fp) => {
+                    if let Object::BuiltinFunc(arglen2, fp2) = &*other.borrow() {
                         arglen == arglen2 && fp == fp2
+                    } else {
+                        false
+                    }
+                }
+
+                Object::NativeFunc(arglen, _fp) => {
+                    if let Object::NativeFunc(arglen2, _fp2) = &*other.borrow() {
+                        arglen == arglen2 // TODO && *fp.get() == *fp2.get()
                     } else {
                         false
                     }
@@ -172,13 +191,14 @@ pub mod data {
                     }
                     string + ")"
                 }
-                Object::NFunc(arglen, _) => format!("nfunc({})", arglen),
+                Object::BuiltinFunc(arglen, _) => format!("builtin({})", arglen),
+                Object::NativeFunc(arglen, _) => format!("native({})", arglen),
                 Object::Frame(_, _) => panic!("forbidden type"),
             }
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub enum RuntimeError {
         TypeError,
         KeyError(String),
@@ -260,25 +280,64 @@ pub mod data {
     }
 }
 
-use data::{NativeFunc, Object, RuntimeError, Scope};
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
+pub mod modules {
+    use super::bytes_to_u32;
+    use crate::codegen;
+    use crate::parser::parser;
+    use std::fs;
+    use std::path::PathBuf;
 
-fn bytes_to_i64(val: [u8; 8]) -> i64 {
+    fn read_from_bytes(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+        let mut current = 4;
+        let codelen = bytes_to_u32(&bytes, &mut current);
+        Ok((&bytes[current..current + codelen as usize]).to_vec())
+    }
+    fn read_from_source(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+        let contents: String =
+            String::from(std::str::from_utf8(&bytes).map_err(|err| format!("{}", err))?);
+        let block = parser::parse(&contents).map_err(|err| format!("{}", err))?;
+        let codes = codegen::to_bytes(codegen::generate(block).map_err(|err| format!("{}", err))?);
+        Ok(codes)
+    }
+    pub fn read(path: PathBuf) -> Result<Vec<u8>, String> {
+        let bytes = fs::read(path).map_err(|err| format!("{}", err))?;
+        Ok(if &bytes[..4] == [0xCE, 0xDA, 0xFA, 0xBA] {
+            read_from_bytes(bytes)?
+        } else {
+            read_from_source(bytes)?
+        })
+    }
+}
+
+fn bytes_to_i64(bytes: &Vec<u8>, ip: &mut usize) -> i64 {
+    let val = bytes[*ip..*ip + 8].try_into().expect("");
+    *ip += 8;
     unsafe { transmute::<[u8; 8], i64>(val) }.to_le()
 }
 
-fn bytes_to_f64(val: [u8; 8]) -> f64 {
+fn bytes_to_f64(bytes: &Vec<u8>, ip: &mut usize) -> f64 {
+    let val = bytes[*ip..*ip + 8].try_into().expect("");
+    *ip += 8;
     unsafe { transmute::<[u8; 8], f64>(val) }
 }
 
-pub fn bytes_to_u32(val: [u8; 4]) -> u32 {
+pub fn bytes_to_u32(bytes: &Vec<u8>, ip: &mut usize) -> u32 {
+    let val = bytes[*ip..*ip + 4].try_into().expect("");
+    *ip += 4;
     unsafe { transmute::<[u8; 4], u32>(val) }.to_le()
 }
 
-pub fn bytes_to_u16(val: [u8; 2]) -> u16 {
+pub fn bytes_to_u16(bytes: &Vec<u8>, ip: &mut usize) -> u16 {
+    let val = bytes[*ip..*ip + 2].try_into().expect("");
+    *ip += 2;
     unsafe { transmute::<[u8; 2], u16>(val) }.to_le()
+}
+
+pub fn bytes_to_string(bytes: &Vec<u8>, ip: &mut usize) -> String {
+    let len = bytes_to_u16(bytes, ip);
+    let s = String::from_utf8((&bytes[*ip..*ip + len as usize]).to_vec()).expect("UTF8 error");
+    *ip += len as usize;
+    s
 }
 
 fn pop_int(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<i64, RuntimeError> {
@@ -311,7 +370,8 @@ fn pop_boolable(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<bool, RuntimeErr
         Object::List(v) => v.len() > 0,
         Object::Bendy(m) => m.len() > 0,
         Object::Func(_, _) => true,
-        Object::NFunc(_, _) => true,
+        Object::BuiltinFunc(_, _) => true,
+        Object::NativeFunc(_, _) => true,
         Object::Frame(_, _) => panic!("forbidden type"),
     })
 }
@@ -334,19 +394,54 @@ fn n_list_len(args: Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>
 
 fn n_import(args: Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
     if let Object::Str(name) = &*args[0].borrow() {
-        //TODO import all kinds of modules properly
-        let lib_path = env::current_dir()
-            .expect("no current dir")
-            .join(format!("lib{}.so", name));
-        println!("Importing: {:?}", &lib_path);
-        let lib =
-            Library::new(lib_path).map_err(|err| RuntimeError::ImportError(format!("{}", err)))?;
-        unsafe {
-            let func: Symbol<NativeFunc> = lib.get(b"n_sqrt").unwrap();
-            let result = func(Box::new(Vec::new()))?;
-            println!("result: {:?}", result);
+        let current_dir = env::current_dir().expect("no current dir");
+
+        let olv_path: PathBuf = current_dir.join(format!("{}.olv", name));
+        let olvc_path: PathBuf = current_dir.join(format!("{}.olvc", name));
+        let olvn_path: PathBuf = current_dir.join(format!("{}.olvn", name));
+
+        for file in fs::read_dir(&current_dir).expect("no current dir") {
+            let f: PathBuf = file.expect("").path();
+            if f == olv_path || f == olvc_path {
+                let new_current_dir = f.parent().unwrap().join(".");
+                env::set_current_dir(new_current_dir).expect("couldn't set current dir");
+                let codes = modules::read(f).map_err(|e| RuntimeError::ImportError(e))?;
+                let result = run(codes)?;
+                env::set_current_dir(current_dir).expect("couldn't set current dir");
+                return Ok(result);
+            } else if f == olvn_path {
+                let contents = fs::read_to_string(f)
+                    .map_err(|err| RuntimeError::ImportError(format!("{}", err)))?;
+                let parsed: Value = serde_json::from_str(contents.as_str())
+                    .map_err(|err| RuntimeError::ImportError(format!("{}", err)))?;
+                return if let Some(libname) = parsed["library"].as_str() {
+                    let lib: RcLibrary = RcLibrary::new(current_dir.join(libname))
+                        .map_err(|err| RuntimeError::ImportError(format!("{}", err)))?;
+
+                    let format_error = RuntimeError::ImportError(String::from("json format error"));
+                    let mut native_funcs = HashMap::new();
+                    let funcs = parsed["functions"].as_array().ok_or(format_error.clone())?;
+                    for fun in funcs {
+                        let native = fun["native"].as_str().ok_or(format_error.clone())?;
+                        let name = String::from(fun["name"].as_str().ok_or(format_error.clone())?);
+                        let args = fun["args"].as_u64().ok_or(format_error.clone())? as usize;
+                        let native_c_str = CString::new(native).expect("nul error");
+                        let func: RcSymbol<NativeFunc> = unsafe { lib.get(native_c_str).unwrap() };
+                        native_funcs
+                            .insert(name, Rc::new(RefCell::new(Object::NativeFunc(args, func))));
+                    }
+                    Ok(Rc::new(RefCell::new(Object::Bendy(native_funcs))))
+                } else {
+                    Err(RuntimeError::ImportError(String::from(
+                        "no string library field in json",
+                    )))
+                };
+            }
         }
-        Ok(Rc::new(RefCell::new(Object::None)))
+        Err(RuntimeError::ImportError(format!(
+            "module not found: {}",
+            name
+        )))
     } else {
         Err(RuntimeError::TypeError)
     }
@@ -355,19 +450,19 @@ fn n_import(args: Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>, 
 fn insert_builtin_funcs(scope: &mut Scope) {
     scope.put(
         "print".to_string(),
-        Rc::new(RefCell::new(Object::NFunc(1, n_print))),
+        Rc::new(RefCell::new(Object::BuiltinFunc(1, n_print))),
     );
     scope.put(
         "len".to_string(),
-        Rc::new(RefCell::new(Object::NFunc(1, n_list_len))),
+        Rc::new(RefCell::new(Object::BuiltinFunc(1, n_list_len))),
     );
     scope.put(
         "import".to_string(),
-        Rc::new(RefCell::new(Object::NFunc(1, n_import))),
+        Rc::new(RefCell::new(Object::BuiltinFunc(1, n_import))),
     );
 }
 
-pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError> {
+pub fn run(in_codes: Vec<u8>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
     let mut stack: Vec<Rc<RefCell<Object>>> = Vec::new();
     let mut scope = Scope::new();
 
@@ -387,9 +482,7 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
         ip += 1;
         match code {
             1 => {
-                let val = bytes_to_u16(codes[ip..ip + 2].try_into().expect(""));
-                ip += 2;
-                push!(Object::Str(constants[val as usize].clone()));
+                push!(Object::Str(bytes_to_string(&codes, &mut ip)));
             }
             2 => {
                 let val = codes[ip] > 0;
@@ -397,52 +490,37 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
                 push!(Object::Bool(val));
             }
             3 => {
-                let val = bytes_to_f64(codes[ip..ip + 8].try_into().expect(""));
-                ip += 8;
+                let val = bytes_to_f64(&codes, &mut ip);
                 push!(Object::Float(val));
             }
             4 => {
-                let val = bytes_to_i64(codes[ip..ip + 8].try_into().expect(""));
-                ip += 8;
+                let val = bytes_to_i64(&codes, &mut ip);
                 push!(Object::Int(val));
             }
             5 => {
-                let arglen = bytes_to_u16(codes[ip..ip + 2].try_into().expect(""));
-                ip += 2;
+                let arglen = bytes_to_u16(&codes, &mut ip);
                 let args: Vec<String> = (0..arglen)
-                    .map(|_| {
-                        let val = bytes_to_u16(codes[ip..ip + 2].try_into().expect(""));
-                        ip += 2;
-                        constants[val as usize].clone()
-                    })
+                    .map(|_| bytes_to_string(&codes, &mut ip))
                     .collect();
-                let codelen = bytes_to_u32(codes[ip..ip + 4].try_into().expect(""));
-                ip += 4;
+                let codelen = bytes_to_u32(&codes, &mut ip);
                 let codes: Vec<u8> = codes[ip..ip + codelen as usize].to_vec();
                 ip += codelen as usize;
                 push!(Object::Func(args, codes));
             }
             6 => {
-                let val = bytes_to_u16(codes[ip..ip + 2].try_into().expect(""));
-                ip += 2;
-                let name = constants[val as usize].clone();
-                scope.put(name, stack.pop().unwrap());
+                scope.put(bytes_to_string(&codes, &mut ip), stack.pop().unwrap());
             }
             7 => {
-                let val = bytes_to_u16(codes[ip..ip + 2].try_into().expect(""));
-                ip += 2;
-                let name = constants[val as usize].clone();
-                stack.push(Rc::clone(&scope.get(name)?));
+                stack.push(Rc::clone(&scope.get(bytes_to_string(&codes, &mut ip))?));
             }
             10 => {
-                let val = bytes_to_u32(codes[ip..ip + 4].try_into().expect(""));
-                ip += 4;
+                let val = bytes_to_u32(&codes, &mut ip);
                 if !pop_boolable(&mut stack)? {
                     ip = val as usize;
                 }
             }
             11 => {
-                let val = bytes_to_u32(codes[ip..ip + 4].try_into().expect(""));
+                let val = bytes_to_u32(&codes, &mut ip);
                 ip = val as usize;
             }
             12 => push!(Object::None),
@@ -609,13 +687,21 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
                     ip = 0;
                     codes = f_codes.clone();
                 }
-                Object::NFunc(arglen, fp) => {
+                Object::BuiltinFunc(arglen, func) => {
                     let mut args = Vec::with_capacity(*arglen);
                     for _ in 0..*arglen {
                         let val = stack.pop().unwrap();
                         args.push(val);
                     }
-                    stack.push(fp(Box::new(args))?);
+                    stack.push(func(Box::new(args))?);
+                }
+                Object::NativeFunc(arglen, func) => {
+                    let mut args = Vec::with_capacity(*arglen);
+                    for _ in 0..*arglen {
+                        let val = stack.pop().unwrap();
+                        args.push(val);
+                    }
+                    stack.push(func(Box::new(args))?);
                 }
                 _ => return Err(RuntimeError::TypeError),
             },
@@ -694,5 +780,5 @@ pub fn run(in_codes: Vec<u8>, constants: Vec<String>) -> Result<(), RuntimeError
             _ => panic!("unexpected code: {:?}", code),
         }
     }
-    Ok(())
+    Ok(stack.pop().unwrap())
 }
