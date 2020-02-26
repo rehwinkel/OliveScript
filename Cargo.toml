@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Ian Rehwinkel <ian.rehwinkel@tutanota.com>"]
 edition = "2018"
 
+[workspace]
+members = ["native/olvmath"]
+
 [[bin]]
 name = "olv"
 path = "src/main_interpreter.rs"
@@ -13,7 +16,7 @@ name = "olvc"
 path = "src/main_compiler.rs"
 
 [lib]
-name = "olv"
+name = "olvnative"
 path = "src/lib.rs"
 
 [dependencies]

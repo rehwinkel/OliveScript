@@ -1,4 +1,4 @@
-use olv::{Object, RuntimeError};
+use olvnative::{Object, RuntimeError};
 use std::cell::RefCell;
 use std::rc::Rc;
 
