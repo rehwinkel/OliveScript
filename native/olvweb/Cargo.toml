@@ -9,5 +9,5 @@ olive_script = { path = "../.." }
 
 [lib]
 name = "web"
-crate-type = ["dylib"]
+crate-type = ["cdylib"]
 path = "src/lib.rs"
