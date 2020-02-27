@@ -1,0 +1,10 @@
+{
+    "library": "libweb.so",
+    "functions": [
+        {
+            "name": "sqrt",
+            "native": "n_sqrt",
+            "args": 1
+        }
+    ]
+}

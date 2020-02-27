@@ -5,7 +5,7 @@ authors = ["Ian Rehwinkel <ian.rehwinkel@tutanota.com>"]
 edition = "2018"
 
 [workspace]
-members = ["native/olvmath"]
+members = ["native/olvmath", "native/olvweb"]
 
 [[bin]]
 name = "olv"
