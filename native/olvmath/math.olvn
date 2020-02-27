@@ -1,5 +1,5 @@
 {
-    "library": "libmath.so",
+    "library": "math.olvlib",
     "functions": [
         {
             "name": "sqrt",

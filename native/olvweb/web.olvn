@@ -1,5 +1,5 @@
 {
-    "library": "libweb.so",
+    "library": "web.olvlib",
     "functions": [
         {
             "name": "sqrt",
