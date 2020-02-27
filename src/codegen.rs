@@ -107,7 +107,7 @@ impl Code {
 
     fn string_to_bytes(val: String) -> Vec<u8> {
         [
-            Code::u16_to_bytes(val.capacity() as u16),
+            Code::u16_to_bytes(val.len() as u16),
             val.as_bytes().to_vec(),
         ]
         .concat()
@@ -177,7 +177,7 @@ impl Code {
         codes.push(self.get_code(counter))
     }
     fn string_len(s: &String) -> usize {
-        s.capacity() + 2
+        s.len() + 2
     }
 
     fn len(&self) -> usize {
