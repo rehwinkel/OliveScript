@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 pub mod data {
+    use libc;
     use libloading::RcSymbol;
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -36,6 +37,18 @@ pub mod data {
         None,
         BuiltinFunc(usize, NativeFunc),
         NativeFunc(usize, RcSymbol<NativeFunc>),
+        Pointer(*mut usize),
+    }
+
+    impl Drop for Object {
+        fn drop(&mut self) {
+            match self {
+                Object::Pointer(ptr) => unsafe {
+                    libc::free((*ptr) as *mut libc::c_void);
+                },
+                _ => {}
+            }
+        }
     }
 
     impl Object {
@@ -129,7 +142,6 @@ pub mod data {
                         false
                     }
                 }
-
                 Object::BuiltinFunc(arglen, fp) => {
                     if let Object::BuiltinFunc(arglen2, fp2) = &*other.borrow() {
                         arglen == arglen2 && fp == fp2
@@ -137,10 +149,16 @@ pub mod data {
                         false
                     }
                 }
-
                 Object::NativeFunc(arglen, _fp) => {
                     if let Object::NativeFunc(arglen2, _fp2) = &*other.borrow() {
                         arglen == arglen2 // TODO && *fp.get() == *fp2.get()
+                    } else {
+                        false
+                    }
+                }
+                Object::Pointer(ptr) => {
+                    if let Object::Pointer(ptr2) = &*other.borrow() {
+                        ptr == ptr2
                     } else {
                         false
                     }
@@ -149,19 +167,26 @@ pub mod data {
             }
         }
 
-        pub fn to_string(&self) -> String {
+        pub fn to_string(&self, debug: bool) -> String {
             match self {
-                Object::Str(s) => s.clone(),
+                Object::Str(s) => {
+                    if debug {
+                        format!("{:?}", s)
+                    } else {
+                        s.clone()
+                    }
+                }
                 Object::Bool(b) => b.to_string(),
                 Object::Int(i) => i.to_string(),
                 Object::Float(f) => format!("{:.5}", f),
                 Object::None => String::from("none"),
+                Object::Pointer(ptr) => format!("{:?}", *ptr),
                 Object::List(v) => {
                     let mut string = String::from("[");
                     if v.len() > 0 {
-                        string += format!("{}", (*v[0].borrow()).to_string()).as_str();
+                        string += format!("{}", (*v[0].borrow()).to_string(true)).as_str();
                         for value in &v[1..] {
-                            string += format!(", {}", (*value.borrow()).to_string()).as_str();
+                            string += format!(", {}", (*value.borrow()).to_string(true)).as_str();
                         }
                     }
                     string + "]"
@@ -171,11 +196,12 @@ pub mod data {
                     if m.len() > 0 {
                         let keys: Vec<&String> = m.keys().collect();
                         string +=
-                            format!("{}: {}", keys[0], (*m[keys[0]].borrow()).to_string()).as_str();
+                            format!("{}: {}", keys[0], (*m[keys[0]].borrow()).to_string(true))
+                                .as_str();
                         for key in &keys[1..] {
                             let value = &m[*key];
-                            string +=
-                                format!(", {}: {}", key, (*value.borrow()).to_string()).as_str();
+                            string += format!(", {}: {}", key, (*value.borrow()).to_string(true))
+                                .as_str();
                         }
                     }
                     string + "}"
@@ -203,6 +229,7 @@ pub mod data {
         TypeError,
         KeyError(String),
         ImportError(String),
+        Error(String),
     }
 
     impl Error for RuntimeError {}
@@ -213,6 +240,7 @@ pub mod data {
                 RuntimeError::TypeError => write!(f, "type error: {:?}", self),
                 RuntimeError::KeyError(key) => write!(f, "key error: {}", key),
                 RuntimeError::ImportError(err) => write!(f, "import error: {}", err),
+                RuntimeError::Error(err) => write!(f, "generic error: {}", err),
             }
         }
     }
@@ -357,7 +385,7 @@ fn pop_string(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<String, RuntimeErr
 }
 
 fn pop_stringable(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<String, RuntimeError> {
-    Ok((&*stack.pop().unwrap().borrow()).to_string())
+    Ok((&*stack.pop().unwrap().borrow()).to_string(false))
 }
 
 fn pop_boolable(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<bool, RuntimeError> {
@@ -373,11 +401,12 @@ fn pop_boolable(stack: &mut Vec<Rc<RefCell<Object>>>) -> Result<bool, RuntimeErr
         Object::BuiltinFunc(_, _) => true,
         Object::NativeFunc(_, _) => true,
         Object::Frame(_, _) => panic!("forbidden type"),
+        Object::Pointer(ptr) => unsafe { **ptr > 0 },
     })
 }
 
 fn n_print(args: Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
-    println!("{}", args[0].borrow().to_string());
+    println!("{}", args[0].borrow().to_string(false));
     Ok(Rc::new(RefCell::new(Object::None)))
 }
 

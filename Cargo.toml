@@ -22,3 +22,4 @@ path = "src/lib.rs"
 [dependencies]
 libloading = { git = "https://github.com/rehwinkel/rust_libloading" }
 serde_json = "1.0.48"
+libc = "0.2.67"
