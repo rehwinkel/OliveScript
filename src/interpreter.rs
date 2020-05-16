@@ -421,6 +421,20 @@ fn n_list_len(args: Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>
     ))))
 }
 
+fn n_bendy_has_key(
+    args: Box<Vec<Rc<RefCell<Object>>>>,
+) -> Result<Rc<RefCell<Object>>, RuntimeError> {
+    Ok(Rc::new(RefCell::new(Object::Bool(
+        match &*args[0].borrow() {
+            Object::Bendy(m) => m.contains_key(match &*args[1].borrow() {
+                Object::Str(s) => s,
+                _ => return Err(RuntimeError::TypeError),
+            }),
+            _ => return Err(RuntimeError::TypeError),
+        },
+    ))))
+}
+
 fn n_import(args: Box<Vec<Rc<RefCell<Object>>>>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
     if let Object::Str(name) = &*args[0].borrow() {
         let current_dir = env::current_dir().expect("no current dir");
@@ -484,6 +498,10 @@ fn insert_builtin_funcs(scope: &mut Scope) {
     scope.put(
         "len".to_string(),
         Rc::new(RefCell::new(Object::BuiltinFunc(1, n_list_len))),
+    );
+    scope.put(
+        "key".to_string(),
+        Rc::new(RefCell::new(Object::BuiltinFunc(2, n_bendy_has_key))),
     );
     scope.put(
         "import".to_string(),
