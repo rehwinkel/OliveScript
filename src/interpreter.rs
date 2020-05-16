@@ -701,6 +701,18 @@ pub fn run(in_codes: Vec<u8>) -> Result<Rc<RefCell<Object>>, RuntimeError> {
                         return Err(RuntimeError::KeyError(key.to_string()));
                     }
                 }
+                Object::Str(string) => {
+                    let key = pop_int(&mut stack)?;
+                    if key >= 0 {
+                        if let Some(val) = string.chars().nth(key as usize) {
+                            stack.push(Rc::new(RefCell::new(Object::Str(val.to_string()))));
+                        } else {
+                            return Err(RuntimeError::KeyError(key.to_string()));
+                        }
+                    } else {
+                        return Err(RuntimeError::KeyError(key.to_string()));
+                    }
+                }
                 _ => {
                     return Err(RuntimeError::TypeError);
                 }
