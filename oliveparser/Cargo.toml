@@ -1,13 +1,11 @@
 [package]
-name = "olvmath"
+name = "oliveparser"
 version = "0.1.0"
 authors = ["Ian Rehwinkel <ian.rehwinkel@tutanota.com>"]
 edition = "2018"
 
 [dependencies]
-olivescript = { path = "../.." }
+lalrpop-util = "^0.19"
 
-[lib]
-name = "math"
-crate-type = ["cdylib"]
-path = "src/lib.rs"
+[build-dependencies]
+lalrpop = { version = "^0.19", features = ["lexer"] }

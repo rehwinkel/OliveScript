@@ -1,0 +1,15 @@
+sqrt = fun(n, iters) {
+    a = 1.0;
+    i = 0;
+    while (i < iters) {
+        a = 0.5 * (a + n / a);
+        i = i + 1;
+    }
+    return a;
+};
+
+i = 0;
+while (i < 10) {
+    sqrt(2, 100);
+    i = i + 1;
+}

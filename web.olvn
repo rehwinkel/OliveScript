@@ -1,0 +1,20 @@
+{
+    "library": "target/debug/libweb.so",
+    "functions": [
+        {
+            "name": "create_server",
+            "native": "n_bind",
+            "args": 1
+        },
+        {
+            "name": "recv_req",
+            "native": "n_recv",
+            "args": 1
+        },
+        {
+            "name": "send_res",
+            "native": "n_send",
+            "args": 2
+        }
+    ]
+}

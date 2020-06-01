@@ -1,5 +1,5 @@
 ## the bendy datatype (deutsch: flexibel) is a datatype similar to a dictionary/table
-it has the name because of its flexibility #
+it has the name because of its flexibility ##
 
 # creating a new bendy
 obj = new {

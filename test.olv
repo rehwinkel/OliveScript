@@ -1,0 +1,7 @@
+web = import("web");
+server = web.create_server("0.0.0.0:8080");
+while(1) {
+    req = web.recv_req(server);
+    print(req);
+    print(web.send_res(req.client, req.addr));
+}

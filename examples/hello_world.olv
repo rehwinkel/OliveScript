@@ -1,1 +1,6 @@
-print("hello world");
+x = 43583;
+print = fun(a) {
+    return x * a;
+};
+x = new [print(3), x, print, 45];
+return 1;

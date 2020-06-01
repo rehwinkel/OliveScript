@@ -1,0 +1,152 @@
+use crate::ast::{Statement, Expression, Located, BinaryOperator, UnaryOperator};
+
+grammar;
+
+match {
+    r"\s*" => {}, 
+    r"##(\#[^#]|[^#])*##" => {},  
+    r"#[^\n\r#][^\n\r]*[\n\r]*" => {}, 
+} else {
+    _
+}
+
+pub File: Vec<Located<Statement<'input>>> = <statements:Located<Statement>*> => statements;
+
+Located<T>: Located<T> = <start:@L> <inner:T> <end:@R> => Located { start, end, inner };
+
+CommaSep<T>: Vec<T> = {
+    <first:T?> <mut rest:("," <T>)*> => match first {
+        None => vec![],
+        Some(first) => {
+            rest.insert(0, first);
+            rest
+        }
+    }
+};
+
+Statement: Statement<'input> = {
+    <block:Block> => Statement::Block { statements: block },
+    "continue" ";" => Statement::Continue,
+    "break" ";" => Statement::Break,
+    "return" <expression:Located<Expression>> ";" => Statement::Return { value: expression },
+    "while" "(" <expression:Located<Expression>> ")" <block:Block> => Statement::While { condition: expression, block },
+    <expression:Located<ExpressionT14>> "(" <args:CommaSep<Located<Expression>>> ")" ";" => Statement::Call { expression: Box::new(expression), args },
+    <left:Located<ExpressionT14>> "=" <right:Located<Expression>> ";" => Statement::Assign { left: Box::new(left), right: Box::new(right) },
+    <statement:IfStatement> => statement,
+};
+
+IfStatement: Statement<'input> = {
+    "if" "(" <expression:Located<Expression>> ")" <block:Block> <elseblock:("else" <Block>)?> => Statement::If { condition: expression, block, elseblock },
+    "if" "(" <expression:Located<Expression>> ")" <block:Block> "else" <elseifstatement:Located<IfStatement>> => Statement::If { condition: expression, block, elseblock: Some(vec![elseifstatement]) }
+};
+
+Block: Vec<Located<Statement<'input>>> = "{" <statements:Located<Statement>*> "}" => statements;
+
+Expression: Expression<'input> = <expression:ExpressionT2> => expression;
+
+ExpressionT2: Expression<'input> = {
+    <left:Located<ExpressionT2>> "or" <right:Located<ExpressionT3>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::BoolOr },
+    <expression:ExpressionT3> => expression,
+};
+
+ExpressionT3: Expression<'input> = {
+    <left:Located<ExpressionT3>> "and" <right:Located<ExpressionT4>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::BoolAnd },
+    <expression:ExpressionT4> => expression,
+};
+
+ExpressionT4: Expression<'input> = {
+    <left:Located<ExpressionT4>> "|" <right:Located<ExpressionT5>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::BitOr },
+    <expression:ExpressionT5> => expression,
+};
+
+ExpressionT5: Expression<'input> = {
+    <left:Located<ExpressionT5>> "^" <right:Located<ExpressionT6>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::BitXOr },
+    <expression:ExpressionT6> => expression,
+};
+
+ExpressionT6: Expression<'input> = {
+    <left:Located<ExpressionT6>> "&" <right:Located<ExpressionT7>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::BitAnd },
+    <expression:ExpressionT7> => expression,
+};
+
+ExpressionT7: Expression<'input> = {
+    <left:Located<ExpressionT7>> "==" <right:Located<ExpressionT8>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::Equals },
+    <left:Located<ExpressionT7>> "!=" <right:Located<ExpressionT8>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::NotEquals },
+    <expression:ExpressionT8> => expression,
+};
+
+ExpressionT8: Expression<'input> = {
+    <left:Located<ExpressionT8>> "$" <right:Located<ExpressionT9>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::Concat },
+    <expression:ExpressionT9> => expression,
+};
+
+ExpressionT9: Expression<'input> = {
+    <left:Located<ExpressionT9>> "<=" <right:Located<ExpressionT10>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::LessEquals },
+    <left:Located<ExpressionT9>> ">=" <right:Located<ExpressionT10>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::GreaterEquals },
+    <left:Located<ExpressionT9>> "<" <right:Located<ExpressionT10>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::LessThan },
+    <left:Located<ExpressionT9>> ">" <right:Located<ExpressionT10>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::GreaterThan },
+    <expression:ExpressionT10> => expression,
+};
+
+ExpressionT10: Expression<'input> = {
+    <left:Located<ExpressionT10>> "<<" <right:Located<ExpressionT11>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::BitLsh },
+    <left:Located<ExpressionT10>> ">>" <right:Located<ExpressionT11>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::BitRsh },
+    <expression:ExpressionT11> => expression,
+};
+
+ExpressionT11: Expression<'input> = {
+    <left:Located<ExpressionT11>> "+" <right:Located<ExpressionT12>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::Add },
+    <left:Located<ExpressionT11>> "-" <right:Located<ExpressionT12>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::Sub },
+    <expression:ExpressionT12> => expression,
+};
+
+ExpressionT12: Expression<'input> = {
+    <left:Located<ExpressionT12>> "/" <right:Located<ExpressionT13>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::FloatDiv },
+    <left:Located<ExpressionT12>> "//" <right:Located<ExpressionT13>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::IntDiv },
+    <left:Located<ExpressionT12>> "*" <right:Located<ExpressionT13>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::Mul },
+    <left:Located<ExpressionT12>> "%" <right:Located<ExpressionT13>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::Mod },
+    <expression:ExpressionT13> => expression,
+};
+
+ExpressionT13: Expression<'input> = {
+    "+" <expression:ExpressionT13> => expression,
+    "-" <expression:Located<ExpressionT13>> => Expression::Unary { expression: Box::new(expression), operator: UnaryOperator::Neg },
+    "!" <expression:Located<ExpressionT13>> => Expression::Unary { expression: Box::new(expression), operator: UnaryOperator::BoolNot },
+    <expression:ExpressionT14> => expression,
+};
+
+ExpressionT14: Expression<'input> = {
+    <left:Located<ExpressionT14>> "." <right:Located<Value>> => Expression::Binary { left: Box::new(left), right: Box::new(right), operator: BinaryOperator::Access },
+    <expression:Located<ExpressionT14>> "[" <index:Located<Expression>> "]" => Expression::Index { expression: Box::new(expression), index: Box::new(index) },
+    <expression:Located<ExpressionT14>> "(" <args:CommaSep<Located<Expression>>> ")" => Expression::Call { expression: Box::new(expression), args },
+    <expression:Value> => expression,
+};
+
+Value: Expression<'input> = {
+    "new" "[" <elements:CommaSep<Located<Expression>>> "]" => Expression::List { elements },
+    "new" "{" <elements:CommaSep<(Located<Identifier> ":" Located<Expression>)>> "}" => Expression::Bendy { elements: elements.into_iter().map(|(name, _, val)| (name, val)).collect() },
+    <value:IntLiteral> => Expression::Integer { value },
+    <value:FloatLiteral> => Expression::Float { value },
+    "true" => Expression::Boolean { value: true },
+    "false" => Expression::Boolean { value: false },
+    "none" => Expression::None,
+    <name:Identifier> => Expression::Variable { name },
+    <value:StringLiteral> => Expression::String { value },
+    "fun" "(" <parameters:CommaSep<Located<Identifier>>> ")" <block:Block> => Expression::Function { parameters, block },
+    "(" <expression:Expression> ")" => expression,
+};
+
+IntLiteral: &'input str = <s:r"\d[\d_]*"> => s;
+
+FloatLiteral: &'input str = {
+    <s:r"\d[\d_]*\."> => s,
+    <s:r"\d[\d_]*\.\d[\d_]*"> => s,
+    <s:r"\.\d[\d_]*"> => s,
+};
+
+Identifier: &'input str = <s:r"[a-zA-Z_][a-zA-Z\d_]*"> => s;
+
+StringLiteral: String = <s:r#""((\\\\|\\"|\\n|\\r|[^"\n\r\\])*)""#> => {
+    let text = &s[1..s.len()-1];
+    text.replace("\\\\", "\\").replace("\\n", "\n").replace("\\r", "\r").replace("\\\"", "\"")
+};
