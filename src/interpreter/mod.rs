@@ -6,6 +6,7 @@ use std::collections::HashMap;
 mod builtins;
 mod data;
 mod error;
+mod object;
 pub mod garbage;
 use data::Data;
 use garbage::{Garbage, GarbageCollector};
