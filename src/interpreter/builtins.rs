@@ -1,8 +1,7 @@
-use super::data::Data;
-use super::garbage::Garbage;
+use super::object::{Object, RefObject};
 use std::collections::HashMap;
 
-fn native_print(args: Vec<Garbage<Data>>) -> Data {
+fn native_print(args: Vec<Object>) -> Object {
     println!(
         "{}",
         args.iter()
@@ -10,35 +9,30 @@ fn native_print(args: Vec<Garbage<Data>>) -> Data {
             .collect::<Vec<String>>()
             .join(", ")
     );
-    Data::None
+    Object::new_none()
 }
 
-fn native_len(args: Vec<Garbage<Data>>) -> Data {
-    Data::Integer {
-        value: match &*args[0] {
-            Data::Bendy { data } => data.len() as i64,
-            Data::List { data } => data.len() as i64,
-            Data::String { value } => value.len() as i64,
-            _ => return Data::None,
+fn native_len(args: Vec<Object>) -> Object {
+    Object::new_integer(match &args[0] {
+        Object::Pointer { value: v } => match &**v {
+            RefObject::Bendy { data } => data.len() as i64,
+            RefObject::List { data } => data.len() as i64,
+            RefObject::String { value } => value.len() as i64,
+            _ => return Object::None,
         },
-    }
+        _ => return Object::None,
+    })
 }
 
-pub fn get_functions() -> HashMap<String, Data> {
+pub fn get_functions() -> HashMap<String, Object> {
     let mut functions = HashMap::new();
     functions.insert(
         String::from("print"),
-        Data::Native {
-            arg_count: 1,
-            closure: native_print as fn(Vec<Garbage<Data>>) -> Data,
-        },
+        Object::new_native(1, native_print as fn(Vec<Object>) -> Object),
     );
     functions.insert(
         String::from("len"),
-        Data::Native {
-            arg_count: 1,
-            closure: native_len as fn(Vec<Garbage<Data>>) -> Data,
-        },
+        Object::new_native(1, native_len as fn(Vec<Object>) -> Object),
     );
     functions
 }

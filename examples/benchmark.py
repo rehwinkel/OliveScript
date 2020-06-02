@@ -8,6 +8,6 @@ def sqrt(n, iters):
 
 
 i = 0
-while i < 10000:
-    print(sqrt(2, 10000))
+while i < 1000:
+    sqrt(2, 1000)
     i = i + 1
